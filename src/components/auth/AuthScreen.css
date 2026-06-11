@@ -1,0 +1,148 @@
+.auth-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background-color: #121212;
+  color: #d1d1d1;
+  font-family: 'Inter', sans-serif;
+}
+
+.auth-card {
+  background-color: #1a1b1e;
+  border: 1px solid #2a2b2e;
+  border-radius: 8px;
+  padding: 40px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.auth-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.auth-header h1 {
+  margin: 16px 0 8px;
+  font-size: 24px;
+  color: #fff;
+  font-weight: 600;
+}
+
+.auth-header p {
+  margin: 0;
+  color: #808080;
+  font-size: 14px;
+}
+
+.role-selector {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.role-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  background-color: #212225;
+  border: 2px solid #2a2b2e;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #808080;
+}
+
+.role-option:hover {
+  background-color: #2a2b2e;
+}
+
+.role-option.active {
+  border-color: #00ffcc;
+  background-color: rgba(0, 255, 204, 0.05);
+  color: #00ffcc;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #a0a0a0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.form-group input {
+  background-color: #212225;
+  border: 1px solid #333;
+  color: #fff;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+  border-color: #00ffcc;
+}
+
+.login-btn {
+  background-color: #00ffcc;
+  color: #000;
+  border: none;
+  padding: 14px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-top: 8px;
+}
+
+.login-btn:hover:not(:disabled) {
+  background-color: #00cc66;
+}
+.login-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-auth-mode-btn {
+  background: transparent;
+  border: none;
+  color: #00ffcc;
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.toggle-auth-mode-btn:hover {
+  text-decoration: underline;
+}
+
+.auth-error {
+  background-color: rgba(255, 77, 77, 0.1);
+  border: 1px solid #ff4d4d;
+  color: #ff4d4d;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-bottom: 20px;
+  text-align: center;
+}

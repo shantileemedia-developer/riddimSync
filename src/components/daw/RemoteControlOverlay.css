@@ -1,0 +1,114 @@
+/* ── Engineer overlay — full-screen view of Artist's screen ── */
+.rc-engineer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+
+.rc-engineer-bar {
+  flex-shrink: 0;
+  height: 36px;
+  background: rgba(255, 77, 77, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+  user-select: none;
+  z-index: 1;
+}
+
+.rc-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  animation: rc-blink 1s step-end infinite;
+}
+
+@keyframes rc-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.3; }
+}
+
+.rc-exit-btn {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+
+.rc-exit-btn:hover {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.rc-screen-video {
+  flex: 1;
+  width: 100%;
+  display: block;
+  object-fit: fill;
+  cursor: crosshair;
+}
+
+/* ── Artist overlay — blocks local input, shows RC active banner ── */
+.rc-artist-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none; /* Let replayed events reach DAW elements underneath */
+  /* Red glow border to signal RC is active */
+  box-shadow: inset 0 0 0 3px rgba(255, 77, 77, 0.7);
+}
+
+.rc-artist-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: rgba(255, 77, 77, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+  pointer-events: all; /* This bar IS interactive for artist */
+  user-select: none;
+}
+
+.rc-revoke-btn {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  pointer-events: all;
+  letter-spacing: 0.3px;
+}
+
+.rc-revoke-btn:hover {
+  background: rgba(0, 0, 0, 0.45);
+}

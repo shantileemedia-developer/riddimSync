@@ -1,0 +1,64 @@
+{
+  "name": "studiodesk",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"npm run electron:serve\"",
+    "electron:serve": "wait-on tcp:5173 && tsc -p tsconfig.electron.json && electron .",
+    "build": "tsc -b && vite build && tsc -p tsconfig.electron.json",
+    "electron:build": "npm run build && electron-builder",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.1",
+    "dotenv": "^17.4.2",
+    "file-saver": "^2.0.5",
+    "jszip": "^3.10.1",
+    "lucide-react": "^1.17.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/file-saver": "^2.0.7",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^10.0.3",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.2",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^8.0.12",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.studiodesk.app",
+    "productName": "StudioDESK",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ]
+  }
+}

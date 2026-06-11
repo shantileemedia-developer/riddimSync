@@ -1,0 +1,218 @@
+.transport-panel {
+  height: 68px;
+  background-color: #1e1f22;
+  border-top: 1px solid #2a2b2e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  gap: 20px;
+  flex-shrink: 0;
+}
+
+.transport-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  background-color: #1a1b1e;
+  border: 1px solid #2a2b2e;
+  border-radius: 4px;
+  padding: 0 8px;
+}
+
+.transport-btn {
+  background: transparent;
+  border: none;
+  color: #a0a0a0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 34px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.transport-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.transport-btn.active {
+  color: #00ffcc;
+  background-color: rgba(0, 255, 204, 0.1);
+}
+
+.play-btn:hover { color: #00cc66; }
+.stop-btn:hover { color: #e6e6e6; }
+.record-btn { color: #ff4d4d; }
+.record-btn:hover { color: #ff6666; background-color: rgba(255, 77, 77, 0.1); }
+.record-btn.active { color: #fff; background-color: #ff4d4d; }
+
+.time-display {
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 0 18px;
+  min-width: 160px;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.time-primary {
+  font-size: 18px;
+  color: #00ffcc;
+  font-weight: bold;
+  line-height: 1;
+  letter-spacing: 0.5px;
+}
+
+.time-secondary {
+  font-size: 12px;
+  color: #909090;
+  margin-top: 3px;
+  letter-spacing: 0.3px;
+}
+
+.tempo-section {
+  padding: 0;
+}
+
+.tempo-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0 14px;
+  border-right: 1px solid #2a2b2e;
+  cursor: pointer;
+}
+.tempo-box:last-child {
+  border-right: none;
+}
+.tempo-box:hover {
+  background-color: rgba(255,255,255,0.04);
+}
+
+.tempo-box .label {
+  font-size: 10px;
+  color: #707070;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.tempo-box .value {
+  font-size: 14px;
+  color: #e0e0e0;
+  font-weight: 600;
+  margin-top: 2px;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.click-box.active .value {
+  color: #00ffcc;
+}
+
+.perf-meter {
+  gap: 10px;
+}
+
+.meter-bar {
+  width: 60px;
+  height: 6px;
+  background-color: #111;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: linear-gradient(to right, #00cc66, #00ffcc);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* ── Stream / ListenTo section ────────────────────── */
+.stream-section {
+  padding: 0 10px;
+  min-width: 88px;
+  justify-content: center;
+  transition: border-color 0.2s;
+}
+
+.stream-section.streaming {
+  border-color: rgba(255, 77, 77, 0.5);
+  background-color: rgba(255, 77, 77, 0.06);
+}
+
+.stream-section.receiving {
+  border-color: rgba(0, 255, 204, 0.35);
+  background-color: rgba(0, 255, 204, 0.04);
+}
+
+.stream-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+
+.stream-btn:hover {
+  color: #ccc;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.stream-btn.active {
+  color: #ff4d4d;
+}
+
+.stream-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.stream-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff4d4d;
+  flex-shrink: 0;
+  animation: stream-blink 1s step-end infinite;
+}
+
+.stream-rx-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #444;
+}
+
+.stream-rx-indicator.active {
+  color: #00ffcc;
+}
+
+.stream-rx-indicator .stream-live-dot {
+  background: #444;
+  animation: none;
+}
+
+.stream-rx-indicator .stream-live-dot.active {
+  background: #00ffcc;
+  animation: stream-blink 1.2s step-end infinite;
+}
+
+@keyframes stream-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.2; }
+}

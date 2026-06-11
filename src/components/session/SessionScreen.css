@@ -1,0 +1,105 @@
+.session-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #0d0d0d;
+}
+
+.session-card {
+  background-color: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 40px 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  min-width: 360px;
+}
+
+.session-card h2 {
+  font-size: 22px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.session-sub {
+  font-size: 13px;
+  color: #808080;
+  text-align: center;
+}
+
+.session-hint {
+  font-size: 11px;
+  color: #555;
+}
+
+.session-code-box {
+  background-color: #0d0d0d;
+  border: 2px solid #00ffcc;
+  border-radius: 8px;
+  padding: 16px 32px;
+  font-size: 32px;
+  font-family: 'Consolas', monospace;
+  font-weight: 700;
+  color: #00ffcc;
+  letter-spacing: 6px;
+  margin: 8px 0;
+}
+
+.session-input {
+  background-color: #0d0d0d;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 14px 20px;
+  font-size: 28px;
+  font-family: 'Consolas', monospace;
+  font-weight: 700;
+  color: #00ffcc;
+  letter-spacing: 6px;
+  text-align: center;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.session-input:focus {
+  border-color: #00ffcc;
+}
+
+.session-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  width: 100%;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.session-btn.primary {
+  background-color: #00ffcc;
+  color: #000;
+}
+.session-btn.primary:hover:not(:disabled) {
+  background-color: #00e6b8;
+}
+.session-btn.primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.session-btn.ghost {
+  background-color: transparent;
+  color: #808080;
+  border: 1px solid #333;
+}
+.session-btn.ghost:hover {
+  background-color: #1e1e1e;
+  color: #d1d1d1;
+}

@@ -1,0 +1,391 @@
+.media-pool-panel {
+  width: 280px;
+  min-width: 200px;
+  flex-shrink: 0;
+  border-left: 1px solid #2a2b2e;
+  border-top: none !important;
+  border-bottom: none !important;
+  border-right: none !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.pool-icon {
+  color: #a0a0a0;
+  cursor: pointer;
+}
+.pool-icon:hover {
+  color: #fff;
+}
+
+.pool-toolbar {
+  padding: 6px 8px;
+  background-color: #212225;
+  border-bottom: 1px solid #2a2b2e;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.select-all-btn {
+  background: #1a1b1e;
+  border: 1px solid #333;
+  color: #808080;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  letter-spacing: 0.4px;
+}
+.select-all-btn:hover {
+  border-color: #00ffcc55;
+  color: #00ffcc;
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  background-color: #121212;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 4px 8px;
+  gap: 8px;
+}
+
+.search-input {
+  background: transparent;
+  border: none;
+  color: #d1d1d1;
+  font-size: 11px;
+  outline: none;
+  width: 100%;
+}
+.search-input::placeholder {
+  color: #666;
+}
+
+.pool-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pool-list-header {
+  display: flex;
+  padding: 6px 8px;
+  background-color: #2a2b2e;
+  font-size: 10px;
+  color: #a0a0a0;
+  font-weight: 500;
+  border-bottom: 1px solid #1a1b1e;
+}
+
+.col-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.col-dur { width: 40px; text-align: right; }
+.col-date { width: 60px; text-align: right; margin-left: 8px; }
+.col-used { width: 28px; text-align: right; margin-left: 6px; font-size: 10px; font-weight: 700; color: #00ffcc; }
+
+.pool-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.pool-item {
+  display: flex;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #d1d1d1;
+  border-bottom: 1px solid #2a2b2e;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+}
+.pool-item:hover {
+  background-color: #2a2b2e;
+}
+
+.file-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-actions {
+  position: absolute;
+  right: 8px;
+  display: none;
+}
+.pool-item:hover .item-actions {
+  display: block;
+}
+
+.preview-btn {
+  background-color: #00ffcc;
+  color: #000;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.preview-btn:hover {
+  background-color: #00cc66;
+}
+
+.pool-footer {
+  height: 24px;
+  background-color: #1a1b1e;
+  border-top: 1px solid #2a2b2e;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 10px;
+  color: #666;
+}
+
+/* Lasso and Selection */
+.pool-list-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.pool-item.selected {
+  background-color: #00ffcc;
+  color: #000;
+}
+
+.pool-item.selected .file-name-text,
+.pool-item.selected .col-dur,
+.pool-item.selected .col-date,
+.pool-item.selected .col-used {
+  color: #000;
+}
+
+/* ── Pool context menu ───────────────────────────── */
+.pool-ctx-menu {
+  position: fixed;
+  background-color: #2a2b2e;
+  border: 1px solid #3a3b3e;
+  border-radius: 6px;
+  padding: 4px 0;
+  z-index: 2000;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  min-width: 160px;
+}
+
+.pool-ctx-item {
+  display: block;
+  width: 100%;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  color: #d1d1d1;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.pool-ctx-item:hover {
+  background-color: #3a3b3e;
+  color: #fff;
+}
+.pool-ctx-item.danger {
+  color: #ff6666;
+}
+.pool-ctx-item.danger:hover {
+  background-color: rgba(255, 77, 77, 0.15);
+  color: #ff4d4d;
+}
+
+.pool-ctx-separator {
+  height: 1px;
+  background-color: #3a3b3e;
+  margin: 4px 0;
+}
+
+.pool-item.selected:hover {
+  background-color: #00cc66;
+}
+
+.lasso-selection-box {
+  position: absolute;
+  border: 1px solid rgba(0, 255, 204, 0.8);
+  background-color: rgba(0, 255, 204, 0.2);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.pool-action-btn {
+  background: transparent;
+  border: none;
+  color: #00ffcc;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pool-action-btn:hover {
+  color: #00cc66;
+}
+
+.pool-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 16px;
+  color: #555;
+  font-size: 12px;
+}
+.pool-empty-hint {
+  font-size: 11px;
+  color: #444;
+  text-align: center;
+}
+
+.pool-waveform-row {
+  background-color: #1a1b1e;
+  border-bottom: 1px solid #2a2b2e;
+  padding: 4px 8px;
+}
+
+.preview-btn.playing {
+  background-color: #00ffcc;
+  color: #000;
+}
+
+/* ── Export progress banner ─────────────────────── */
+.export-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background-color: #1a2e2a;
+  border-bottom: 1px solid #00ffcc33;
+  font-size: 10px;
+  color: #00ffcc;
+}
+
+/* ── Spinner animation ──────────────────────────── */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.spin { animation: spin 0.9s linear infinite; }
+
+/* ── WorkUpload send button ─────────────────────── */
+.workupload-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 0;
+  background-color: #1a2e2a;
+  border: none;
+  border-top: 1px solid #00ffcc33;
+  color: #00ffcc;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.workupload-btn:hover {
+  background-color: #1e3a36;
+  color: #33ffda;
+}
+.workupload-btn:active {
+  background-color: #153028;
+}
+
+.workupload-btn.workupload-drag-over {
+  background-color: #1e4a3e;
+  border-top-color: #00ffcc;
+  color: #33ffda;
+  box-shadow: inset 0 0 0 2px #00ffcc55;
+}
+
+/* ── Archive (ZIP) pool item ────────────────────────── */
+.pool-item-archive {
+  background-color: rgba(255, 184, 77, 0.04);
+  border-bottom-color: rgba(255, 184, 77, 0.15);
+  cursor: grab;
+}
+.pool-item-archive:hover {
+  background-color: rgba(255, 184, 77, 0.08);
+}
+.pool-item-archive:active { cursor: grabbing; }
+
+/* ── Remove Unused button ───────────────────────────── */
+.remove-unused-btn {
+  background-color: rgba(255, 77, 77, 0.12) !important;
+  border-color: rgba(255, 77, 77, 0.3) !important;
+  color: #ff7777 !important;
+}
+.remove-unused-btn:hover {
+  border-color: #ff4d4d !important;
+  color: #ff4d4d !important;
+  background-color: rgba(255, 77, 77, 0.2) !important;
+}
+
+.pool-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.delete-btn {
+  background: transparent;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  margin-left: 4px;
+}
+.delete-btn:hover {
+  background-color: rgba(255, 77, 77, 0.2);
+  color: #ff4d4d;
+}
+
+.item-actions {
+  position: absolute;
+  right: 8px;
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+.pool-item:hover .item-actions {
+  display: flex;
+}
+
+/* ── Responsive scaling ── */
+@media screen and (max-width: 1440px) {
+  .media-pool-panel {
+    width: 220px;
+  }
+}
+@media screen and (max-width: 1280px) {
+  .media-pool-panel {
+    width: 200px;
+    min-width: 200px;
+  }
+}

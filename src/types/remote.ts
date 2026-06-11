@@ -1,0 +1,5 @@
+export type RemoteInputEvent =
+  | { type: 'pointerdown' | 'pointermove' | 'pointerup'; nx: number; ny: number; button: number; buttons: number }
+  | { type: 'click' | 'dblclick' | 'contextmenu'; nx: number; ny: number; button: number }
+  | { type: 'wheel'; nx: number; ny: number; deltaX: number; deltaY: number }
+  | { type: 'keydown' | 'keyup'; key: string; code: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean; repeat: boolean };

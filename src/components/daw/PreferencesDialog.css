@@ -1,0 +1,241 @@
+.pref-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pref-dialog {
+  background-color: #1e1f22;
+  border: 1px solid #2a2b2e;
+  border-radius: 8px;
+  width: 560px;
+  max-width: 95vw;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+}
+
+.pref-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #2a2b2e;
+}
+
+.pref-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.pref-close-btn {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+}
+.pref-close-btn:hover {
+  background-color: #333;
+  color: #fff;
+}
+
+.pref-body {
+  display: flex;
+  flex: 1;
+  min-height: 280px;
+}
+
+/* ── Sidebar ───────────────────────────────── */
+.pref-sidebar {
+  width: 130px;
+  border-right: 1px solid #2a2b2e;
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+
+.pref-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 14px;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s;
+}
+.pref-tab:hover {
+  color: #d1d1d1;
+  background-color: rgba(255, 255, 255, 0.04);
+}
+.pref-tab.active {
+  color: #00ffcc;
+  background-color: rgba(0, 255, 204, 0.07);
+  border-left: 2px solid #00ffcc;
+  padding-left: 12px;
+}
+
+/* ── Content area ──────────────────────────── */
+.pref-content {
+  flex: 1;
+  padding: 20px 22px;
+  overflow-y: auto;
+}
+
+.pref-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #707070;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin: 0 0 16px 0;
+}
+
+.pref-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.pref-label {
+  width: 120px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #b0b0b0;
+  padding-top: 3px;
+}
+
+.pref-select {
+  flex: 1;
+  background-color: #111;
+  border: 1px solid #333;
+  color: #e0e0e0;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+  outline: none;
+}
+.pref-select:focus {
+  border-color: #00ffcc;
+}
+
+.pref-driver-note {
+  flex: 1;
+  font-size: 11px;
+  color: #606060;
+  line-height: 1.5;
+  padding: 3px 0;
+}
+
+.pref-static-value {
+  font-size: 12px;
+  color: #808080;
+  padding-top: 3px;
+}
+
+.pref-hint {
+  font-size: 11px;
+  color: #555;
+  line-height: 1.5;
+  margin: 8px 0 0 0;
+}
+
+/* ── Toggle switch ─────────────────────────── */
+.pref-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pref-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+.pref-toggle input {
+  display: none;
+}
+.pref-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background-color: #333;
+  border-radius: 20px;
+  transition: background 0.2s;
+}
+.pref-toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 3px;
+  top: 3px;
+  background-color: #888;
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+.pref-toggle input:checked + .pref-toggle-slider {
+  background-color: rgba(0, 255, 204, 0.2);
+  border: 1px solid #00ffcc;
+}
+.pref-toggle input:checked + .pref-toggle-slider::before {
+  background-color: #00ffcc;
+  transform: translateX(16px);
+}
+
+.pref-toggle-label {
+  font-size: 12px;
+  color: #a0a0a0;
+}
+
+/* ── Footer ────────────────────────────────── */
+.pref-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid #2a2b2e;
+}
+
+.pref-btn {
+  padding: 7px 18px;
+  border-radius: 4px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pref-btn-cancel {
+  background-color: #2a2b2e;
+  color: #a0a0a0;
+}
+.pref-btn-cancel:hover {
+  background-color: #333;
+  color: #d1d1d1;
+}
+
+.pref-btn-save {
+  background-color: #00ffcc;
+  color: #000;
+}
+.pref-btn-save:hover {
+  background-color: #00e6b8;
+}
