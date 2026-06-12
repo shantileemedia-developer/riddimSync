@@ -6,9 +6,20 @@ import type { RemoteInputEvent } from '../types/remote';
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  // Free public TURN servers via Open Relay (Metered) — no sign-up required.
+  // Handles users behind symmetric NAT (corporate networks, strict ISPs).
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turns:openrelay.metered.ca:443',
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ];
 
-// TURN server support — set VITE_TURN_URL / VITE_TURN_USER / VITE_TURN_CREDENTIAL in .env
+// Optional: override with a private TURN server via env vars
 if (import.meta.env.VITE_TURN_URL) {
   ICE_SERVERS.push({
     urls: import.meta.env.VITE_TURN_URL as string,
