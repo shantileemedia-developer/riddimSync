@@ -317,27 +317,32 @@ export const useAudioEngine = () => {
       const trackName = state.tracks.find(t => t.id === currentTrackId)?.name ?? 'Track';
       const takeNum = state.poolItems.filter(p => p.name.startsWith(trackName)).length + 1;
       const name = `${trackName}_Take_${takeNum}`;
+      const localFileName = `${name}.webm`;
 
-      const audioUrl = await uploadAudioToSupabase(blob, `${name}.webm`);
+      // PRIMARY: blob URL — works instantly, no network dependency
+      const audioUrl = URL.createObjectURL(blob);
 
-      // If a local project folder is active, also save it directly to the local disk's Audio folder!
+      // Save to the project's local Audio/ folder (primary on-disk storage)
       if (audioDirHandle) {
         try {
           // @ts-ignore
-          const fileHandle = await audioDirHandle.getFileHandle(`${name}.webm`, { create: true });
+          const fileHandle = await audioDirHandle.getFileHandle(localFileName, { create: true });
           const writable = await fileHandle.createWritable();
           await writable.write(blob);
           await writable.close();
-          console.log(`Successfully saved ${name}.webm to local Audio folder.`);
         } catch (err) {
-          console.error(`Failed to save ${name}.webm to local folder:`, err);
+          console.error(`Local Audio/ save failed for ${localFileName}:`, err);
         }
       }
+
+      // BACKGROUND: Supabase cloud backup — fire and forget, never blocks playback
+      uploadAudioToSupabase(blob, localFileName).catch(() => {});
 
       const poolItem: PoolItem = {
         id: `pool_${Date.now()}`,
         name,
         audioUrl,
+        localFileName,
         duration,
         createdAt: new Date(),
         waveformPeaks: peaks,

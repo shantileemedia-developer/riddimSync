@@ -39,6 +39,7 @@ export interface PoolItem {
   id: string;
   name: string;
   audioUrl: string;
+  localFileName?: string; // filename inside the project's Audio/ subfolder
   duration: number;
   createdAt: Date;
   waveformPeaks: number[];

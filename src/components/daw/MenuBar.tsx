@@ -138,10 +138,37 @@ const MenuBar: React.FC<MenuBarProps> = ({
       const fh = await dh.getFileHandle('project.json');
       const file = await fh.getFile();
       const saved = JSON.parse(await file.text());
-      dispatch({ type: 'SET_STATE', payload: saved });
       setProjectDirHandle(dh);
+      // @ts-ignore
       const adh = await dh.getDirectoryHandle('Audio', { create: true });
       setAudioDirHandle(adh);
+
+      // Restore blob URLs from local Audio/ folder for pool items and regions
+      const urlMap: Record<string, string> = {};
+      for (const item of (saved.poolItems ?? []) as any[]) {
+        if (item.localFileName) {
+          try {
+            // @ts-ignore
+            const itemFh = await adh.getFileHandle(item.localFileName);
+            const itemFile = await itemFh.getFile();
+            urlMap[item.id] = URL.createObjectURL(itemFile);
+          } catch { /* file missing — keep whatever URL was saved */ }
+        }
+      }
+
+      if (Object.keys(urlMap).length > 0) {
+        saved.poolItems = (saved.poolItems ?? []).map((p: any) =>
+          urlMap[p.id] ? { ...p, audioUrl: urlMap[p.id] } : p
+        );
+        // Match regions to pool items by name to update their audioUrl too
+        const poolByName: Record<string, string> = {};
+        for (const p of saved.poolItems) if (urlMap[p.id]) poolByName[p.name] = urlMap[p.id];
+        saved.regions = (saved.regions ?? []).map((r: any) =>
+          poolByName[r.name] ? { ...r, audioUrl: poolByName[r.name] } : r
+        );
+      }
+
+      dispatch({ type: 'SET_STATE', payload: saved });
       toast(`Opened: ${dh.name}`);
     } catch (err: any) {
       if (err.name !== 'AbortError') toast('No project.json found in that folder.');
