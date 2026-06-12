@@ -617,19 +617,25 @@ const ArrangeWindow = () => {
 
     for (const file of files) {
       try {
-        // File extends Blob — use it directly so we never lose the data.
-        // decodeAudioData() transfers (detaches) its ArrayBuffer argument,
-        // so we decode a copy and keep the original File as the upload source.
         const ab       = await file.arrayBuffer();
         const audioCtx = new AudioContext();
         const buf      = await audioCtx.decodeAudioData(ab.slice(0));
         audioCtx.close();
         const { left: peaks, right: peaksR } = await generatePeaksStereo(buf);
         const name     = file.name.replace(/\.[^.]+$/, '');
-        const audioUrl = await uploadAudioToSupabase(file, file.name);
 
-        dispatch({ type: 'ADD_POOL_ITEM', payload: { id: `pool_${Date.now()}`, name, audioUrl, duration: buf.duration, createdAt: new Date(), waveformPeaks: peaks, waveformPeaksR: peaksR } });
+        // Use blob URL immediately — no network wait
+        const audioUrl   = URL.createObjectURL(file);
+        const poolItemId = `pool_${Date.now()}`;
+
+        dispatch({ type: 'ADD_POOL_ITEM', payload: { id: poolItemId, name, audioUrl, localFileName: file.name, duration: buf.duration, createdAt: new Date(), waveformPeaks: peaks, waveformPeaksR: peaksR } });
         dispatch({ type: 'ADD_REGION',    payload: { id: `region_${Date.now()}`, trackId: target.id, versionId: target.activeVersionId, startTime, duration: buf.duration, name, audioUrl, waveformPeaks: peaks, waveformPeaksR: peaksR } });
+
+        // Upload to Supabase in the background and swap in the permanent URL
+        uploadAudioToSupabase(file, file.name).then(supabaseUrl => {
+          if (supabaseUrl && supabaseUrl !== audioUrl)
+            dispatch({ type: 'UPDATE_AUDIO_URLS', payload: { poolItemId, audioUrl: supabaseUrl } });
+        }).catch(() => {});
       } catch { /* skip undecodable */ }
     }
   };

@@ -17,6 +17,15 @@
   height: 100%;
   display: flex;
   align-items: center;
+  /* Allows dragging the Electron window from the logo area */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+/* Interactive elements inside the drag region must opt out */
+.menu-bar-logo * {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .menu-bar-brand {

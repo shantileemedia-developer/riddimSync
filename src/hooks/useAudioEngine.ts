@@ -62,7 +62,8 @@ export const useAudioEngine = () => {
   const startAnimLoop = useCallback((ctx: AudioContext) => {
     stopAnimLoop();
     const tick = () => {
-      const elapsed = ctx.currentTime - playStartAudioTimeRef.current;
+      // Clamp to 0 so the transport cursor doesn't run ahead during the lookahead window
+      const elapsed = Math.max(0, ctx.currentTime - playStartAudioTimeRef.current);
       let dawTime = playStartDawTimeRef.current + elapsed;
 
       // Handle looping
@@ -94,7 +95,10 @@ export const useAudioEngine = () => {
     if (ctx.state === 'suspended') await ctx.resume();
 
     const offset = currentTimeRef.current;
-    playStartAudioTimeRef.current = ctx.currentTime;
+    // Schedule 120 ms ahead so all parallel decodes finish before audio starts
+    const LOOKAHEAD = 0.12;
+    const scheduleStart = ctx.currentTime + LOOKAHEAD;
+    playStartAudioTimeRef.current = scheduleStart;
     playStartDawTimeRef.current = offset;
 
     dispatch({ type: 'SET_PLAYING', payload: true });
@@ -127,12 +131,15 @@ export const useAudioEngine = () => {
       trackGainsRef.current[track.id]     = gain;
     }
 
-    for (const region of state.regions) {
-      if (!playableTracks.has(region.trackId)) continue;
-      if (region.isMuted) continue;
-      if (!region.audioUrl) continue;
-      if (region.startTime + region.duration <= offset) continue;
+    const playableRegions = state.regions.filter(region =>
+      playableTracks.has(region.trackId) &&
+      !region.isMuted &&
+      region.audioUrl &&
+      region.startTime + region.duration > offset
+    );
 
+    // Decode all regions in parallel — much faster than serial awaits
+    await Promise.all(playableRegions.map(async (region) => {
       try {
         const response = await fetch(region.audioUrl);
         const arrayBuffer = await response.arrayBuffer();
@@ -142,22 +149,20 @@ export const useAudioEngine = () => {
         source.buffer = audioBuffer;
 
         const bus = trackBusses[region.trackId];
-        if (bus) {
-          source.connect(bus.gain);
-        }
+        if (bus) source.connect(bus.gain);
 
-        const whenInAudio    = playStartAudioTimeRef.current + Math.max(0, region.startTime - offset);
+        const whenInAudio  = scheduleStart + Math.max(0, region.startTime - offset);
         // audioOffset shifts into the source file for split regions
-        const fileOffset     = (region.audioOffset ?? 0) + Math.max(0, offset - region.startTime);
+        const fileOffset   = (region.audioOffset ?? 0) + Math.max(0, offset - region.startTime);
         // limit playback to the region duration so split regions don't bleed
-        const playDuration   = region.duration - Math.max(0, offset - region.startTime);
+        const playDuration = region.duration - Math.max(0, offset - region.startTime);
 
         source.start(whenInAudio, fileOffset, playDuration);
         activeSourcesRef.current.push(source);
       } catch {
         // Skip regions with undecodable audio
       }
-    }
+    }));
 
     if (state.transport.metronomeOn) {
       const bps = state.transport.tempo / 60;
