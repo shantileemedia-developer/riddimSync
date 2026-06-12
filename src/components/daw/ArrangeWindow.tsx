@@ -61,7 +61,7 @@ function toBars(seconds: number, tempo: number) {
 
 // ── Component ────────────────────────────────────────────────────────
 const ArrangeWindow = () => {
-  const { state, dispatch, currentTimeRef, recordingStartTimeRef, livePeaksRef } = useDaw();
+  const { state, dispatch, currentTimeRef, recordingStartTimeRef, livePeaksRef, audioDirHandle } = useDaw();
   const { tracks, regions, activeTool, selectedRegionId, markers } = state;
   const { tempo, isLooping, loopStart, loopEnd, punchIn, punchOut } = state.transport;
 
@@ -630,6 +630,17 @@ const ArrangeWindow = () => {
 
         dispatch({ type: 'ADD_POOL_ITEM', payload: { id: poolItemId, name, audioUrl, localFileName: file.name, duration: buf.duration, createdAt: new Date(), waveformPeaks: peaks, waveformPeaksR: peaksR } });
         dispatch({ type: 'ADD_REGION',    payload: { id: `region_${Date.now()}`, trackId: target.id, versionId: target.activeVersionId, startTime, duration: buf.duration, name, audioUrl, waveformPeaks: peaks, waveformPeaksR: peaksR } });
+
+        // Copy into the project's local Audio/ folder so it persists with the project
+        if (audioDirHandle) {
+          try {
+            // @ts-ignore
+            const fh = await audioDirHandle.getFileHandle(file.name, { create: true });
+            const w = await fh.createWritable();
+            await w.write(file);
+            await w.close();
+          } catch (err) { console.error('Audio folder copy failed:', err); }
+        }
 
         // Upload to Supabase in the background and swap in the permanent URL
         uploadAudioToSupabase(file, file.name).then(supabaseUrl => {

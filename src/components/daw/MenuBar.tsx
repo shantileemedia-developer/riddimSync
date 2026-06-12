@@ -70,10 +70,10 @@ const MenuBar: React.FC<MenuBarProps> = ({
 
   const {
     dispatch, state,
-    setProjectDirHandle, setAudioDirHandle, projectDirHandle,
+    setProjectDirHandle, setAudioDirHandle, projectDirHandle, audioDirHandle,
     currentTimeRef,
   } = useDaw();
-  const projectName = projectDirHandle?.name ?? 'Untitled Project';
+  const projectName = state.projectName ?? 'Untitled Project';
 
   const toast = useCallback((msg: string) => {
     setLocalToast(msg);
@@ -89,9 +89,10 @@ const MenuBar: React.FC<MenuBarProps> = ({
       const w = await fh.createWritable();
       await w.write(JSON.stringify(state, null, 2));
       await w.close();
-    } catch (err) { console.error('Save error:', err); }
+      toast('Project saved.');
+    } catch (err) { console.error('Save error:', err); toast('Save failed.'); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectDirHandle, state]);
+  }, [projectDirHandle, state, toast]);
 
   const handleSaveAs = useCallback(async () => {
     if (!('showDirectoryPicker' in window)) {
@@ -104,9 +105,10 @@ const MenuBar: React.FC<MenuBarProps> = ({
       setProjectDirHandle(dh);
       const adh = await dh.getDirectoryHandle('Audio', { create: true });
       setAudioDirHandle(adh);
+      dispatch({ type: 'SET_STATE', payload: { ...state, projectName: dh.name } });
       const fh = await dh.getFileHandle('project.json', { create: true });
       const w = await fh.createWritable();
-      await w.write(JSON.stringify(state, null, 2));
+      await w.write(JSON.stringify({ ...state, projectName: dh.name }, null, 2));
       await w.close();
       toast(`Saved to: ${dh.name}`);
     } catch (err: any) {
@@ -209,6 +211,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
           id: `pool_${Date.now()}`,
           name: file.name.replace(/\.[^.]+$/, ''),
           audioUrl: url,
+          localFileName: file.name,
           duration,
           createdAt: new Date(),
           waveformPeaks: peaks,
@@ -232,11 +235,21 @@ const MenuBar: React.FC<MenuBarProps> = ({
             });
           }
         }
+        // Copy into the project's local Audio/ folder
+        if (audioDirHandle) {
+          try {
+            // @ts-ignore
+            const fh = await audioDirHandle.getFileHandle(file.name, { create: true });
+            const w = await fh.createWritable();
+            await w.write(file);
+            await w.close();
+          } catch (err) { console.error('Audio folder copy failed:', err); }
+        }
         toast(`Imported: ${poolItem.name}`);
       } catch { toast('Could not decode audio file.'); }
     };
     input.click();
-  }, [dispatch, state.selectedTrackId, state.tracks, currentTimeRef, toast]);
+  }, [dispatch, state.selectedTrackId, state.tracks, currentTimeRef, audioDirHandle, toast]);
 
   // ── Clipboard ────────────────────────────────────────────────────────
 
