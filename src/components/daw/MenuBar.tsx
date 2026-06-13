@@ -20,9 +20,7 @@ interface Menu {
 }
 
 interface MenuBarProps {
-  onOpenPreferences?: () => void;
   onOpenAudioPrefs?: () => void;
-  onExportMixdown?: () => void;
   onCloseProject?: () => void;
 }
 
@@ -55,7 +53,7 @@ const SHORTCUT_LIST = [
 ];
 
 const MenuBar: React.FC<MenuBarProps> = ({
-  onOpenPreferences, onOpenAudioPrefs, onExportMixdown, onCloseProject,
+  onOpenAudioPrefs, onCloseProject,
 }) => {
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const [localToast, setLocalToast] = useState<string | null>(null);
@@ -126,18 +124,6 @@ const MenuBar: React.FC<MenuBarProps> = ({
     }
   }, [state, setProjectDirHandle, setAudioDirHandle, toast]);
 
-  const handleSaveNewVersion = useCallback(async () => {
-    if (!projectDirHandle) { handleSaveAs(); return; }
-    try {
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const name = `project-${ts}.json`;
-      const fh = await projectDirHandle.getFileHandle(name, { create: true });
-      const w = await fh.createWritable();
-      await w.write(JSON.stringify(state, null, 2));
-      await w.close();
-      toast(`Version saved: ${name}`);
-    } catch { toast('Failed to save version.'); }
-  }, [projectDirHandle, state, toast, handleSaveAs]);
 
   const handleOpenProject = useCallback(async () => {
     if (!('showDirectoryPicker' in window)) {

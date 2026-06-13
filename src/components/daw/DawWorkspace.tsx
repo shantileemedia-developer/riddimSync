@@ -295,26 +295,11 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
       {/* Hidden audio output for received live stream (Engineer side) */}
       {userRole === 'engineer' && <audio ref={liveAudioRef} autoPlay style={{ display: 'none' }} />}
       <MenuBar
-        onOpenPreferences={() => setShowPreferences(true)}
         onOpenAudioPrefs={() => setShowAudioPrefs(true)}
         onCloseProject={() => {
           localStorage.removeItem('sl_room');
           localStorage.removeItem('sl_showApp');
           window.location.reload();
-        }}
-        onExportMixdown={async () => {
-          if (isExporting) return;
-          setIsExporting(true);
-          setToast({ msg: 'Rendering mixdown… this may take a moment.', id: Date.now() });
-          try {
-            await exportToWav(state, 'Mixdown', (pct) => {
-              if (pct >= 1) setToast({ msg: 'Export complete — check your Downloads folder.', id: Date.now() });
-            });
-          } catch (err: any) {
-            setToast({ msg: `Export failed: ${err?.message ?? err}`, id: Date.now() });
-          } finally {
-            setIsExporting(false);
-          }
         }}
       />
       {showPreferences && <PreferencesDialog onClose={() => setShowPreferences(false)} />}
