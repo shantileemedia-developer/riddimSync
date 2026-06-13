@@ -1,17 +1,27 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   MousePointer2, Scissors, Eraser, VolumeX, Search,
-  Combine, Pencil, Copy, Palette,
+  Pencil, Copy, Palette,
 } from 'lucide-react';
 import { useDaw } from '../../context/DawContext';
 import type { ActiveTool } from '../../context/DawContext';
 import './TopToolbar.css';
 
-const TOOLS: { id: ActiveTool; icon: React.ElementType; label: string; key: string; iconStyle?: React.CSSProperties }[] = [
+const GlueIcon = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="1" width="6" height="3" rx="1" />
+    <rect x="8" y="4" width="8" height="9" rx="2" />
+    <path d="M10 13 L9 16 L15 16 L14 13" />
+    <line x1="12" y1="16" x2="12" y2="20" />
+    <circle cx="12" cy="21.5" r="1.5" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const TOOLS: { id: ActiveTool; icon: React.ElementType | (() => React.ReactNode); label: string; key: string; iconStyle?: React.CSSProperties; isCustom?: boolean }[] = [
   { id: 'select', icon: MousePointer2, label: 'Object Selection', key: '1' },
   { id: 'range',  icon: Copy,          label: 'Range Selection',  key: '2' },
   { id: 'split',  icon: Scissors,      label: 'Split',            key: '3', iconStyle: { transform: 'rotate(-90deg)' } },
-  { id: 'render', icon: Combine,       label: 'Render',           key: '4' },
+  { id: 'render', icon: GlueIcon,      label: 'Glue',             key: '4', isCustom: true },
   { id: 'erase',  icon: Eraser,        label: 'Erase',            key: '5' },
   { id: 'zoom',   icon: Search,        label: 'Zoom',             key: '6' },
   { id: 'mute',   icon: VolumeX,       label: 'Mute',             key: '7' },
@@ -79,14 +89,17 @@ const TopToolbar: React.FC<TopToolbarProps> = ({ roomCode, userRole, onlineCount
 
         {/* Tool buttons */}
         <div className="toolbar-section">
-          {TOOLS.map(({ id, icon: Icon, label, key, iconStyle }) => (
+          {TOOLS.map(({ id, icon: Icon, label, key, iconStyle, isCustom }) => (
             <button
               key={id}
               className={`toolbar-btn ${activeTool === id ? 'active' : ''}`}
               onClick={() => dispatch({ type: 'SET_TOOL', payload: id })}
               title={`${label}  [${key}]`}
             >
-              <Icon size={15} style={iconStyle} />
+              {isCustom
+                ? <Icon />
+                : <Icon size={15} style={iconStyle} />
+              }
               <span className="tool-key">{key}</span>
             </button>
           ))}

@@ -106,6 +106,7 @@ export type DawBaseAction =
   | { type: 'SPLIT_REGION'; payload: { regionId: string; splitTime: number } }
   | { type: 'TOGGLE_REGION_MUTE'; payload: string }
   | { type: 'RENDER_REGIONS'; payload: string }
+  | { type: 'TRIM_REGION'; payload: { regionId: string; startTime: number; duration: number; audioOffset: number } }
   | { type: 'SET_PROJECT_LENGTH'; payload: number }
   | { type: 'SET_SNAP'; payload: { on: boolean; value: string } }
   | { type: 'ADD_POOL_ITEM'; payload: PoolItem }
@@ -414,6 +415,18 @@ function coreReducer(state: DawState, action: DawAction): DawState {
           r.id === action.payload ? { ...r, isMuted: !r.isMuted } : r
         ),
       };
+
+    case 'TRIM_REGION': {
+      const { regionId, startTime, duration, audioOffset } = action.payload;
+      return {
+        ...state,
+        regions: state.regions.map(r =>
+          r.id === regionId
+            ? { ...r, startTime: Math.max(0, startTime), duration: Math.max(0.05, duration), audioOffset }
+            : r
+        ),
+      };
+    }
 
     case 'RENDER_REGIONS': {
       const region = state.regions.find(r => r.id === action.payload);

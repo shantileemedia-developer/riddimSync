@@ -1,9 +1,9 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import { ZoomIn, ZoomOut, MousePointer2, Crosshair, Scissors, Combine, Eraser, VolumeX, Pencil } from 'lucide-react';
+import { ZoomIn, ZoomOut, MousePointer2, Crosshair, Scissors, Eraser, VolumeX, Pencil } from 'lucide-react';
 import { useDaw } from '../../context/DawContext';
 import type { ActiveTool, Region, PoolItem } from '../../context/DawContext';
 import WaveformDisplay from './WaveformDisplay';
-import { generatePeaksStereo, uploadAudioToSupabase, saveToAudioFolder } from '../../utils/audioUtils';
+import { generatePeaksStereo, uploadAudioToSupabase, saveToAudioFolder, audioBufferToWav } from '../../utils/audioUtils';
 import './ArrangeWindow.css';
 
 const BASE_PX_PER_SEC = 100;
@@ -31,8 +31,8 @@ const TOOL_CURSORS: Record<ActiveTool, string> = {
     6, 6
   ),
   render: svgCursor(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 3a3 3 0 0 1 0 6h-6a3 3 0 0 1 0-6z"/><path d="M6 9H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h10a2 2 0 0 0 2-2v-2"/></svg>`,
-    4, 4
+    `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="3" rx="1"/><rect x="8" y="4" width="8" height="9" rx="2"/><path d="M10 13 L9 16 L15 16 L14 13"/><line x1="12" y1="16" x2="12" y2="20"/><circle cx="12" cy="21.5" r="1.5" fill="white" stroke="none"/></svg>`,
+    10, 19
   ),
   mute: svgCursor(
     `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>`,
@@ -45,7 +45,7 @@ const MINI_TOOLS: { id: ActiveTool; label: string; icon: React.ReactNode }[] = [
   { id: 'select', label: 'Select [1]',  icon: <MousePointer2 size={15} /> },
   { id: 'range',  label: 'Range [2]',   icon: <Crosshair size={15} /> },
   { id: 'split',  label: 'Split [3]',   icon: <Scissors size={15} /> },
-  { id: 'render', label: 'Render [4]',  icon: <Combine size={15} /> },
+  { id: 'render', label: 'Glue [4]',    icon: <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="1" width="6" height="3" rx="1"/><rect x="8" y="4" width="8" height="9" rx="2"/><path d="M10 13 L9 16 L15 16 L14 13"/><line x1="12" y1="16" x2="12" y2="20"/><circle cx="12" cy="21.5" r="1.5" fill="currentColor" stroke="none"/></svg> },
   { id: 'erase',  label: 'Erase [5]',   icon: <Eraser size={15} /> },
   { id: 'zoom',   label: 'Zoom [6]',    icon: <ZoomIn size={15} /> },
   { id: 'mute',   label: 'Mute [7]',    icon: <VolumeX size={15} /> },
@@ -140,6 +140,24 @@ const ArrangeWindow = () => {
   const [dragPreviewStart, setDragPreviewStart] = useState(0);
   const [dragTargetTrackId, setDragTargetTrackId] = useState<string | null>(null);
   const dragTargetTrackIdRef            = useRef<string | null>(null);
+
+  // ── Edge trim drag ───────────────────────────────────────────────
+  const EDGE_PX = 8; // pixels from edge to activate trim handle
+  type TrimState = {
+    regionId: string;
+    edge: 'left' | 'right';
+    origStartTime: number;
+    origDuration: number;
+    origAudioOffset: number;
+    mouseX: number;
+  };
+  const trimRef = useRef<TrimState | null>(null);
+  const trimPreviewRef = useRef<{ startTime: number; duration: number } | null>(null);
+  const [trimmingId, setTrimmingId]     = useState<string | null>(null);
+  const [trimPreview, setTrimPreview]   = useState<{ startTime: number; duration: number } | null>(null);
+  const [hoverEdge, setHoverEdge]       = useState<{ regionId: string; edge: 'left' | 'right' } | null>(null);
+  const hoverEdgeRef = useRef(hoverEdge);
+  hoverEdgeRef.current = hoverEdge;
 
   // File-drag ghost preview
   const [fileGhost, setFileGhost] = useState<{
@@ -461,6 +479,57 @@ const ArrangeWindow = () => {
     };
   }, [draggingId, dispatch]);
 
+  // ── Edge trim drag ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!trimmingId) return;
+    const onMove = (e: MouseEvent) => {
+      const tr = trimRef.current;
+      if (!tr) return;
+      const dx = (e.clientX - tr.mouseX) / pxPerSecRef.current;
+      let preview: { startTime: number; duration: number };
+      if (tr.edge === 'right') {
+        const newDur = Math.max(0.1, tr.origDuration + dx);
+        preview = { startTime: tr.origStartTime, duration: newDur };
+      } else {
+        // left edge — shift start + audioOffset, shrink duration
+        const maxDelta = tr.origDuration - 0.1;
+        const clamped  = Math.max(-tr.origAudioOffset, Math.min(maxDelta, dx));
+        const newStart = applySnapRef.current(tr.origStartTime + clamped);
+        const actual   = newStart - tr.origStartTime;
+        preview = { startTime: newStart, duration: tr.origDuration - actual };
+      }
+      trimPreviewRef.current = preview;
+      setTrimPreview({ ...preview });
+    };
+    const onUp = () => {
+      const tr = trimRef.current;
+      const pv = trimPreviewRef.current;
+      if (tr && pv) {
+        dispatch({
+          type: 'TRIM_REGION',
+          payload: {
+            regionId: tr.regionId,
+            startTime: pv.startTime,
+            duration: pv.duration,
+            audioOffset: tr.edge === 'left'
+              ? tr.origAudioOffset + (pv.startTime - tr.origStartTime)
+              : tr.origAudioOffset,
+          },
+        });
+      }
+      trimRef.current        = null;
+      trimPreviewRef.current = null;
+      setTrimmingId(null);
+      setTrimPreview(null);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, [trimmingId, dispatch]);
+
   // ── Ruler pointer drag (Cubase-style scrub) ──────────────────────
   const rulerDraggingRef = useRef(false);
   const [markerDialog, setMarkerDialog] = useState<{
@@ -521,19 +590,36 @@ const ArrangeWindow = () => {
       case 'select': {
         e.preventDefault();
         dispatch({ type: 'SELECT_REGION', payload: region.id });
-        const regionTrackIdx = tracks.findIndex(t => t.id === region.trackId);
-        dragRef.current = {
-          regionId: region.id,
-          origStart: region.startTime,
-          origTrackId: region.trackId,
-          origTrackIdx: regionTrackIdx,
-          mouseX: e.clientX,
-          mouseY: e.clientY,
-          axis: null,
-        };
-        dragPosRef.current = region.startTime;
-        setDraggingId(region.id);
-        setDragPreviewStart(region.startTime);
+        const edge = hoverEdgeRef.current?.regionId === region.id ? hoverEdgeRef.current.edge : null;
+        if (edge) {
+          // Start edge trim
+          trimRef.current = {
+            regionId: region.id,
+            edge,
+            origStartTime: region.startTime,
+            origDuration: region.duration,
+            origAudioOffset: region.audioOffset ?? 0,
+            mouseX: e.clientX,
+          };
+          trimPreviewRef.current = { startTime: region.startTime, duration: region.duration };
+          setTrimmingId(region.id);
+          setTrimPreview({ startTime: region.startTime, duration: region.duration });
+        } else {
+          // Start move drag (existing behaviour)
+          const regionTrackIdx = tracks.findIndex(t => t.id === region.trackId);
+          dragRef.current = {
+            regionId: region.id,
+            origStart: region.startTime,
+            origTrackId: region.trackId,
+            origTrackIdx: regionTrackIdx,
+            mouseX: e.clientX,
+            mouseY: e.clientY,
+            axis: null,
+          };
+          dragPosRef.current = region.startTime;
+          setDraggingId(region.id);
+          setDragPreviewStart(region.startTime);
+        }
         break;
       }
       case 'split': {
@@ -552,21 +638,92 @@ const ArrangeWindow = () => {
         dispatch({ type: 'TOGGLE_REGION_MUTE', payload: region.id });
         break;
       case 'render':
-        dispatch({ type: 'RENDER_REGIONS', payload: region.id });
+        void (async () => {
+          // Find the immediately next region on this track/version
+          const trackRegions = regionsRef.current
+            .filter(r => r.trackId === region.trackId && r.versionId === region.versionId)
+            .sort((a, b) => a.startTime - b.startTime);
+          const idx  = trackRegions.findIndex(r => r.id === region.id);
+          const next = idx >= 0 ? trackRegions[idx + 1] : undefined;
+          if (!next) return;
+
+          // If neither piece has audio — pure metadata merge (empty draw regions)
+          if (!region.audioUrl && !next.audioUrl) {
+            dispatch({ type: 'RENDER_REGIONS', payload: region.id });
+            return;
+          }
+
+          const mergedStart = region.startTime;
+          const mergedEnd   = next.startTime + next.duration;
+          const totalDur    = mergedEnd - mergedStart;
+
+          try {
+            const SR = 48000;
+            const offCtx = new OfflineAudioContext(2, Math.ceil(totalDur * SR), SR);
+
+            const schedule = async (r: Region, offsetInMerge: number) => {
+              if (!r.audioUrl) return;
+              const res = await fetch(r.audioUrl);
+              const ab  = await res.arrayBuffer();
+              const buf = await offCtx.decodeAudioData(ab);
+              const src = offCtx.createBufferSource();
+              src.buffer = buf;
+              src.connect(offCtx.destination);
+              src.start(Math.max(0, offsetInMerge), r.audioOffset ?? 0, r.duration);
+            };
+
+            await schedule(region, 0);
+            await schedule(next, next.startTime - mergedStart);
+
+            const rendered  = await offCtx.startRendering();
+            const { left: peaks, right: peaksR } = await generatePeaksStereo(rendered);
+            const wavAb     = audioBufferToWav(rendered);
+            const blobUrl   = URL.createObjectURL(new Blob([wavAb], { type: 'audio/wav' }));
+            const stamp     = Date.now();
+            const name      = region.name;
+
+            dispatch({
+              type: 'BOUNCE_REGIONS',
+              payload: {
+                regionIds: [region.id, next.id],
+                newPoolItem: { id: `pool_glue_${stamp}`, name, audioUrl: blobUrl, duration: totalDur, createdAt: new Date(), waveformPeaks: peaks, waveformPeaksR: peaksR },
+                newRegion:   { id: `region_glue_${stamp}`, trackId: region.trackId, versionId: region.versionId, startTime: mergedStart, duration: totalDur, name, audioUrl: blobUrl, waveformPeaks: peaks, waveformPeaksR: peaksR, audioOffset: 0 },
+              },
+            });
+          } catch (err) {
+            console.error('[glue]', err);
+            dispatch({ type: 'RENDER_REGIONS', payload: region.id });
+          }
+        })();
         break;
       default:
         break;
     }
   };
 
-  // Split preview line tracks the snapped position
+  // Region mouse move — split preview + edge-trim cursor detection
   const handleRegionMouseMove = (e: React.MouseEvent, region: Region) => {
-    if (activeTool !== 'split') { if (splitPreview) setSplitPreview(null); return; }
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const rawTime = region.startTime + (e.clientX - rect.left) / pxPerSec;
-    const snappedTime = applySnap(rawTime);
-    const snappedX = (snappedTime - region.startTime) * pxPerSec;
-    setSplitPreview({ regionId: region.id, x: snappedX });
+    if (activeTool === 'split') {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const rawTime = region.startTime + (e.clientX - rect.left) / pxPerSec;
+      const snappedTime = applySnap(rawTime);
+      setSplitPreview({ regionId: region.id, x: (snappedTime - region.startTime) * pxPerSec });
+      return;
+    }
+    if (splitPreview) setSplitPreview(null);
+
+    if (activeTool === 'select' && !draggingId && !trimmingId) {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const distL = e.clientX - rect.left;
+      const distR = rect.right - e.clientX;
+      if (distL <= EDGE_PX) {
+        setHoverEdge({ regionId: region.id, edge: 'left' });
+      } else if (distR <= EDGE_PX) {
+        setHoverEdge({ regionId: region.id, edge: 'right' });
+      } else if (hoverEdge?.regionId === region.id) {
+        setHoverEdge(null);
+      }
+    }
   };
 
   // ── Track empty-space click ──────────────────────────────────────
@@ -897,9 +1054,14 @@ const ArrangeWindow = () => {
                   onMouseDown={e => handleTrackMouseDown(e, track)}
                 >
                   {trackRegions.map(region => {
-                    const displayStart = draggingId === region.id && dragRef.current?.axis !== 'v' ? dragPreviewStart : region.startTime;
-                    const isSelected   = selectedRegionId === region.id;
+                    const isTrimming     = trimmingId === region.id;
+                    const displayStart   = isTrimming && trimPreview ? trimPreview.startTime
+                                        : draggingId === region.id && dragRef.current?.axis !== 'v' ? dragPreviewStart
+                                        : region.startTime;
+                    const displayDur     = isTrimming && trimPreview ? trimPreview.duration : region.duration;
+                    const isSelected     = selectedRegionId === region.id;
                     const isBeingDragged = draggingId === region.id;
+                    const isEdgeHovered  = hoverEdge?.regionId === region.id;
 
                     return (
                       <div
@@ -908,20 +1070,26 @@ const ArrangeWindow = () => {
                           'audio-region',
                           region.isMuted    ? 'region-muted'    : '',
                           isBeingDragged    ? 'region-dragging' : '',
+                          isTrimming        ? 'region-trimming' : '',
                           isSelected        ? 'region-selected'  : '',
                         ].filter(Boolean).join(' ')}
                         style={{
                           left:            displayStart * pxPerSec,
-                          width:           Math.max(4, region.duration * pxPerSec),
+                          width:           Math.max(4, displayDur * pxPerSec),
                           backgroundColor: `${track.color}22`,
                           borderColor:     isSelected ? '#fff' : region.isMuted ? '#555' : track.color,
-                          cursor:          activeTool === 'select' ? (isBeingDragged ? 'grabbing' : 'grab') : TOOL_CURSORS[activeTool],
+                          cursor:          activeTool === 'select'
+                                            ? (isTrimming || isEdgeHovered ? 'ew-resize' : isBeingDragged ? 'grabbing' : 'grab')
+                                            : TOOL_CURSORS[activeTool],
                           opacity:         isBeingDragged && dragRef.current?.axis === 'v' ? 0.4 : undefined,
                         }}
                         draggable={false}
                         onMouseDown={e => handleRegionMouseDown(e, region)}
                         onMouseMove={e => handleRegionMouseMove(e, region)}
-                        onMouseLeave={() => { if (activeTool === 'split') setSplitPreview(null); }}
+                        onMouseLeave={() => {
+                          if (activeTool === 'split') setSplitPreview(null);
+                          if (hoverEdge?.regionId === region.id) setHoverEdge(null);
+                        }}
                       >
                         <span className="region-name" style={{ color: region.isMuted ? '#666' : '#fff' }}>
                           {region.isMuted ? '(muted) ' : ''}{region.name}
