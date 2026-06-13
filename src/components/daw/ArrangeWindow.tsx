@@ -842,7 +842,8 @@ const ArrangeWindow = () => {
         const audioUrl   = URL.createObjectURL(file);
         const poolItemId = `pool_${Date.now()}`;
 
-        dispatch({ type: 'ADD_POOL_ITEM', payload: { id: poolItemId, name, audioUrl, localFileName: file.name, duration: buf.duration, createdAt: new Date(), waveformPeaks: peaks, waveformPeaksR: peaksR } });
+        // Pool stores raw stereo peaks so the file can be reused on any track type later
+        dispatch({ type: 'ADD_POOL_ITEM', payload: { id: poolItemId, name, audioUrl, localFileName: file.name, duration: buf.duration, createdAt: new Date(), waveformPeaks: peaks, waveformPeaksR: rawPeaksR } });
         dispatch({ type: 'ADD_REGION',    payload: { id: `region_${Date.now()}`, trackId: target.id, versionId: target.activeVersionId, startTime, duration: buf.duration, name, audioUrl, waveformPeaks: peaks, waveformPeaksR: peaksR, sourceDuration: buf.duration } });
 
         // Save as 24-bit WAV into the project's Audio/ folder

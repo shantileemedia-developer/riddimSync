@@ -129,7 +129,6 @@ export type DawBaseAction =
 
 export type DawAction = DawBaseAction & { fromSync?: boolean };
 
-const TRACK_COLORS = ['#00ffcc', '#ff4d4d', '#ffb84d', '#4d9fff', '#cc4dff', '#ff9f4d', '#4dff91'];
 
 const makeVersion = (num: number): TrackVersion => ({
   id: `v_${Date.now()}_${num}_${Math.random().toString(36).slice(2, 6)}`,
@@ -291,7 +290,7 @@ function coreReducer(state: DawState, action: DawAction): DawState {
 
     case 'ADD_TRACK': {
       const trackType = action.payload?.trackType ?? 'mono';
-      const color = '#00ffcc';
+      const color = trackType === 'stereo' ? '#00ffcc' : '#555555';
       const name = trackType === 'stereo' ? 'Playback Track' : 'Audio Track';
       const newTrack = makeTrack(name, color, trackType);
       // Stereo tracks always inserted at the top
@@ -451,7 +450,14 @@ function coreReducer(state: DawState, action: DawAction): DawState {
         regions: state.regions
           .filter(r => r.id !== next.id)
           .map(r => r.id === region.id
-            ? { ...r, duration: (next.startTime + next.duration) - r.startTime, waveformPeaks: [...r.waveformPeaks, ...next.waveformPeaks] }
+            ? {
+                ...r,
+                duration: (next.startTime + next.duration) - r.startTime,
+                waveformPeaks: [...r.waveformPeaks, ...next.waveformPeaks],
+                waveformPeaksR: (r.waveformPeaksR && next.waveformPeaksR)
+                  ? [...r.waveformPeaksR, ...next.waveformPeaksR]
+                  : null,
+              }
             : r
           ),
       };
@@ -490,7 +496,7 @@ function coreReducer(state: DawState, action: DawAction): DawState {
       };
 
     case 'ADD_TRACK_AND_MOVE_REGION': {
-      const newTrack = makeTrack('Audio Track', TRACK_COLORS[state.tracks.length % TRACK_COLORS.length], action.payload.trackType ?? 'mono');
+      const newTrack = makeTrack('Audio Track', '#555555', action.payload.trackType ?? 'mono');
       return {
         ...state,
         tracks: [...state.tracks, newTrack],

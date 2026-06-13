@@ -77,7 +77,7 @@ const TrackList = () => {
           duration,
           createdAt: new Date(),
           waveformPeaks: peaks,
-          waveformPeaksR: peaksR ?? undefined,
+          waveformPeaksR: rawPeaksR ?? undefined, // pool keeps raw stereo for reuse on any track type
         };
         dispatch({ type: 'ADD_POOL_ITEM', payload: poolItem });
         dispatch({
