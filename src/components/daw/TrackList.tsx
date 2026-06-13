@@ -64,7 +64,9 @@ const TrackList = () => {
       try {
         const actx = new AudioContext();
         const buf = await actx.decodeAudioData(await file.arrayBuffer());
-        const { left: peaks, right: peaksR } = await generatePeaksStereo(buf);
+        const { left: peaks, right: rawPeaksR } = await generatePeaksStereo(buf);
+        // Mono tracks show a single waveform lane; only pass peaksR for stereo tracks
+        const peaksR = track.type === 'stereo' ? rawPeaksR : null;
         const duration = buf.duration;
         await actx.close();
         const poolItem: PoolItem = {

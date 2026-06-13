@@ -551,6 +551,7 @@ interface DawContextValue {
   livePeaksRef: React.MutableRefObject<number[]>;
   trackAnalysersRef: React.MutableRefObject<Record<string, AnalyserNode>>;
   trackGainsRef: React.MutableRefObject<Record<string, GainNode>>;
+  trackPannersRef: React.MutableRefObject<Record<string, StereoPannerNode>>;
 
   // Local Project storage handles (Chrome/Edge File System Access API)
   projectDirHandle: any | null;
@@ -577,6 +578,7 @@ export const DawProvider: React.FC<DawProviderProps> = ({ children, userRole }) 
   const masterStreamRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const trackAnalysersRef = useRef<Record<string, AnalyserNode>>({});
   const trackGainsRef     = useRef<Record<string, GainNode>>({});
+  const trackPannersRef   = useRef<Record<string, StereoPannerNode>>({});
 
   const [projectDirHandle, setProjectDirHandle] = React.useState<any | null>(null);
   const [audioDirHandle, setAudioDirHandle] = React.useState<any | null>(null);
@@ -595,7 +597,7 @@ export const DawProvider: React.FC<DawProviderProps> = ({ children, userRole }) 
 
   return (
     <DawContext.Provider value={{ 
-      state, dispatch, originalDispatch, setDispatchMiddleware, currentTimeRef, audioCtxRef, recordingStartTimeRef, animFrameRef, masterStreamRef, livePeaksRef, trackAnalysersRef, trackGainsRef, userRole,
+      state, dispatch, originalDispatch, setDispatchMiddleware, currentTimeRef, audioCtxRef, recordingStartTimeRef, animFrameRef, masterStreamRef, livePeaksRef, trackAnalysersRef, trackGainsRef, trackPannersRef, userRole,
       projectDirHandle, setProjectDirHandle, audioDirHandle, setAudioDirHandle
     }}>
       {children}

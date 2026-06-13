@@ -824,7 +824,9 @@ const ArrangeWindow = () => {
         const audioCtx = new AudioContext();
         const buf      = await audioCtx.decodeAudioData(ab.slice(0));
         audioCtx.close();
-        const { left: peaks, right: peaksR } = await generatePeaksStereo(buf);
+        const { left: peaks, right: rawPeaksR } = await generatePeaksStereo(buf);
+        // Mono tracks show a single waveform lane; only pass peaksR for stereo tracks
+        const peaksR = target.type === 'stereo' ? rawPeaksR : null;
         const name     = file.name.replace(/\.[^.]+$/, '');
 
         // Use blob URL immediately — no network wait

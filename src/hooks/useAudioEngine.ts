@@ -5,7 +5,7 @@ import { generatePeaksStereo, uploadAudioToSupabase, saveToAudioFolder } from '.
 import { loadAudioPrefs } from '../components/daw/AudioMIDIPreferencesDialog';
 
 export const useAudioEngine = () => {
-  const { state, dispatch, currentTimeRef, audioCtxRef, recordingStartTimeRef, livePeaksRef, trackAnalysersRef, trackGainsRef, userRole, masterStreamRef, audioDirHandle } = useDaw();
+  const { state, dispatch, currentTimeRef, audioCtxRef, recordingStartTimeRef, livePeaksRef, trackAnalysersRef, trackGainsRef, trackPannersRef, userRole, masterStreamRef, audioDirHandle } = useDaw();
 
   const animFrameRef = useRef<number | null>(null);
   const playStartAudioTimeRef = useRef<number>(0);
@@ -113,22 +113,29 @@ export const useAudioEngine = () => {
     );
 
     const trackBusses: Record<string, { gain: GainNode; analyser: AnalyserNode }> = {};
-    trackGainsRef.current = {};
+    trackGainsRef.current   = {};
+    trackPannersRef.current = {};
     for (const track of state.tracks) {
       const gain = ctx.createGain();
       gain.gain.value = isFinite(track.volume) ? track.volume : 0.8;
+
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = isFinite(track.pan) ? Math.max(-1, Math.min(1, track.pan)) : 0;
 
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.75;
 
-      gain.connect(analyser);
+      // chain: source → gain → panner → analyser → destination
+      gain.connect(panner);
+      panner.connect(analyser);
       analyser.connect(ctx.destination);
       if (masterStreamRef.current) analyser.connect(masterStreamRef.current);
 
       trackBusses[track.id] = { gain, analyser };
       trackAnalysersRef.current[track.id] = analyser;
       trackGainsRef.current[track.id]     = gain;
+      trackPannersRef.current[track.id]   = panner;
     }
 
     const playableRegions = state.regions.filter(region =>
@@ -186,17 +193,23 @@ export const useAudioEngine = () => {
     trackGainsRef.current = {};
   }, [trackAnalysersRef, trackGainsRef]);
 
-  // Live fader/mute — push track volume changes to active GainNodes immediately
+  // Live fader/mute/pan — push track changes to active audio nodes immediately
   useEffect(() => {
     const hasSolo = state.tracks.some(t => t.isSolo);
+    const now = audioCtxRef.current?.currentTime ?? 0;
     for (const track of state.tracks) {
-      const gain = trackGainsRef.current[track.id];
+      const gain   = trackGainsRef.current[track.id];
+      const panner = trackPannersRef.current[track.id];
       if (!gain) continue;
       const muted  = track.isMuted || (hasSolo && !track.isSolo);
       const target = muted ? 0 : (isFinite(track.volume) ? track.volume : 0.8);
-      gain.gain.setTargetAtTime(target, audioCtxRef.current?.currentTime ?? 0, 0.015);
+      gain.gain.setTargetAtTime(target, now, 0.015);
+      if (panner) {
+        const panVal = isFinite(track.pan) ? Math.max(-1, Math.min(1, track.pan)) : 0;
+        panner.pan.setTargetAtTime(panVal, now, 0.015);
+      }
     }
-  }, [state.tracks, trackGainsRef, audioCtxRef]);
+  }, [state.tracks, trackGainsRef, trackPannersRef, audioCtxRef]);
 
   const stopRecordingSession = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -312,8 +325,10 @@ export const useAudioEngine = () => {
         const ab = await blob.arrayBuffer();
         decodedBuffer = await ctx.decodeAudioData(ab);
         const stereo = await generatePeaksStereo(decodedBuffer);
-        peaks    = stereo.left;
-        peaksR   = stereo.right;
+        peaks = stereo.left;
+        // Only carry stereo peaks if the armed track is a stereo track
+        const armedTrack = state.tracks.find(t => t.id === armedTrackIdRef.current);
+        peaksR = armedTrack?.type === 'stereo' ? stereo.right : null;
         duration = decodedBuffer.duration;
       } catch {
         duration = currentTimeRef.current - recordingStartDawTimeRef.current;
