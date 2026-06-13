@@ -31,8 +31,8 @@ const TOOL_CURSORS: Record<ActiveTool, string> = {
     6, 6
   ),
   render: svgCursor(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="1" width="6" height="3" rx="1"/><rect x="8" y="4" width="8" height="9" rx="2"/><path d="M10 13 L9 16 L15 16 L14 13"/><line x1="12" y1="16" x2="12" y2="20"/><circle cx="12" cy="21.5" r="1.5" fill="white" stroke="none"/></svg>`,
-    10, 19
+    `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 c-2 0-3.5 1.5-3.5 3.5 c0 1 0.4 1.9 1 2.5 L3 14.5 a1 1 0 0 0 0 1.4 l1.4 1.4 a1 1 0 0 0 1.4 0 L12 11 c0.6 0.6 1.5 1 2.5 1 c2 0 3.5-1.5 3.5-3.5 S14 2 12 2z"/><line x1="3" y1="17" x2="2" y2="21"/><circle cx="2.5" cy="22" r="1" fill="white" stroke="none"/></svg>`,
+    2, 18
   ),
   mute: svgCursor(
     `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>`,
@@ -45,7 +45,7 @@ const MINI_TOOLS: { id: ActiveTool; label: string; icon: React.ReactNode }[] = [
   { id: 'select', label: 'Select [1]',  icon: <MousePointer2 size={15} /> },
   { id: 'range',  label: 'Range [2]',   icon: <Crosshair size={15} /> },
   { id: 'split',  label: 'Split [3]',   icon: <Scissors size={15} /> },
-  { id: 'render', label: 'Glue [4]',    icon: <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="1" width="6" height="3" rx="1"/><rect x="8" y="4" width="8" height="9" rx="2"/><path d="M10 13 L9 16 L15 16 L14 13"/><line x1="12" y1="16" x2="12" y2="20"/><circle cx="12" cy="21.5" r="1.5" fill="currentColor" stroke="none"/></svg> },
+  { id: 'render', label: 'Glue [4]',    icon: <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2 c-2 0-3.5 1.5-3.5 3.5 c0 1 0.4 1.9 1 2.5 L3 14.5 a1 1 0 0 0 0 1.4 l1.4 1.4 a1 1 0 0 0 1.4 0 L12 11 c0.6 0.6 1.5 1 2.5 1 c2 0 3.5-1.5 3.5-3.5 S14 2 12 2z"/><line x1="3" y1="17" x2="2" y2="21"/><circle cx="2.5" cy="22" r="1" fill="currentColor" stroke="none"/></svg> },
   { id: 'erase',  label: 'Erase [5]',   icon: <Eraser size={15} /> },
   { id: 'zoom',   label: 'Zoom [6]',    icon: <ZoomIn size={15} /> },
   { id: 'mute',   label: 'Mute [7]',    icon: <VolumeX size={15} /> },
