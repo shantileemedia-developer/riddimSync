@@ -21,6 +21,7 @@ export interface Track {
   height?: number;
   versions: TrackVersion[];
   activeVersionId: string;
+  inputDeviceId?: string;  // 'default' or a MediaDeviceInfo.deviceId; undefined = use global pref
 }
 
 export interface Region {
@@ -32,6 +33,7 @@ export interface Region {
   duration: number;         // timelineLength (visible clip length in timeline)
   name: string;
   audioUrl: string;         // URL to the source audio file
+  localFilePath?: string;   // absolute OS path — used by the native audio engine
   waveformPeaks: number[];
   waveformPeaksR?: number[] | null;
   audioOffset?: number;     // sourceOffset: seconds into the source file where the clip window starts
@@ -40,6 +42,7 @@ export interface Region {
   fadeIn?: number;          // fade-in duration in seconds
   fadeOut?: number;         // fade-out duration in seconds
   color?: string;           // per-clip color override (falls back to track color)
+  gain?: number;            // per-clip gain multiplier (1.0 = unity, 0–2 range)
   sourcePeaks?: number[];   // full-source waveform peaks — enables correct display after trim/slip
   sourcePeaksR?: number[] | null;
 }
@@ -49,11 +52,13 @@ export interface PoolItem {
   name: string;
   audioUrl: string;
   localFileName?: string; // filename inside the project's Audio/ subfolder
+  storagePath?: string;   // path inside Supabase Storage bucket (used for retry)
   duration: number;
   createdAt: Date;
   waveformPeaks: number[];
   waveformPeaksR?: number[] | null;
   isArchive?: boolean; // true for ZIP export packages
+  uploadStatus?: 'uploading' | 'done' | 'failed';
 }
 
 export interface DawState {
@@ -63,6 +68,7 @@ export interface DawState {
   regions: Region[];
   poolItems: PoolItem[];
   markers: { id: string; time: number; name: string }[];
+  crossfades: Array<{ id: string; regionA: string; regionB: string }>;
   history: {
     past: Pick<DawState, 'tracks' | 'regions' | 'poolItems'>[];
     future: Pick<DawState, 'tracks' | 'regions' | 'poolItems'>[];
@@ -70,6 +76,7 @@ export interface DawState {
   activeTool: ActiveTool;
   selectedTrackId: string | null;
   selectedRegionId: string | null;
+  selectedRegionIds: string[];
   snapOn: boolean;
   snapValue: string;
   transport: {
@@ -100,7 +107,9 @@ export type DawBaseAction =
   | { type: 'SET_TOOL'; payload: ActiveTool }
   | { type: 'SELECT_TRACK'; payload: string | null }
   | { type: 'SELECT_REGION'; payload: string | null }
+  | { type: 'SELECT_REGIONS'; payload: string[] }
   | { type: 'ADD_TRACK'; payload?: { trackType?: 'mono' | 'stereo' } }
+  | { type: 'DUPLICATE_TRACK'; payload: string }
   | { type: 'REORDER_TRACKS'; payload: Track[] }
   | { type: 'UPDATE_TRACK'; payload: { id: string; updates: Partial<Track> } }
   | { type: 'RENAME_TRACK'; payload: { id: string; name: string } }
@@ -120,6 +129,8 @@ export type DawBaseAction =
   | { type: 'TRIM_REGION'; payload: { regionId: string; startTime: number; duration: number; audioOffset: number } }
   | { type: 'SET_PROJECT_LENGTH'; payload: number }
   | { type: 'SET_SNAP'; payload: { on: boolean; value: string } }
+  | { type: 'ADD_CROSSFADE'; payload: { regionA: string; regionB: string } }
+  | { type: 'REMOVE_CROSSFADE'; payload: string }
   | { type: 'ADD_POOL_ITEM'; payload: PoolItem }
   | { type: 'REMOVE_POOL_ITEM'; payload: string }
   | { type: 'UPDATE_AUDIO_URLS'; payload: { poolItemId: string; audioUrl: string } }
@@ -136,7 +147,9 @@ export type DawBaseAction =
   | { type: 'RENAME_MARKER'; payload: { id: string; name: string } }
   | { type: 'MOVE_MARKER'; payload: { id: string; time: number } }
   | { type: 'SET_STATE'; payload: Partial<DawState> }
-  | { type: 'RENAME_PROJECT'; payload: string };
+  | { type: 'RENAME_PROJECT'; payload: string }
+  | { type: 'SET_REGION_GAIN'; payload: { id: string; gain: number } }
+  | { type: 'SET_POOL_ITEM_UPLOAD_STATUS'; payload: { id: string; status: 'uploading' | 'done' | 'failed'; storagePath?: string } };
 
 export type DawAction = DawBaseAction & { fromSync?: boolean };
 
@@ -170,7 +183,7 @@ const makeTrack = (
 };
 
 const initialTracks: Track[] = [
-  makeTrack('Playback Track', '#4db8ff', 'stereo', '0'),
+  makeTrack('Playback', '#4db8ff', 'stereo', '0'),
   makeTrack('Audio Track',   '#808080', 'mono',   '1'),
   makeTrack('Audio Track',   '#808080', 'mono',   '2'),
   makeTrack('Audio Track',   '#808080', 'mono',   '3'),
@@ -183,10 +196,12 @@ export const initialState: DawState = {
   regions: [],
   poolItems: [],
   markers: [],
+  crossfades: [],
   history: { past: [], future: [] },
   activeTool: 'select',
   selectedTrackId: initialTracks[0]?.id ?? null,
   selectedRegionId: null,
+  selectedRegionIds: [],
   snapOn: true,
   snapValue: '1/16',
   transport: {
@@ -236,6 +251,12 @@ function dawReducer(state: DawState, action: DawAction): DawState {
       return newState;
     }
   }
+}
+
+function autoProjectLength(_current: number, regions: Region[]): number {
+  if (regions.length === 0) return _current;
+  const maxEnd = regions.reduce((m, r) => Math.max(m, r.startTime + r.duration), 0);
+  return maxEnd > 0 ? maxEnd : _current;
 }
 
 function coreReducer(state: DawState, action: DawAction): DawState {
@@ -300,7 +321,9 @@ function coreReducer(state: DawState, action: DawAction): DawState {
     case 'SELECT_TRACK':
       return { ...state, selectedTrackId: action.payload };
     case 'SELECT_REGION':
-      return { ...state, selectedRegionId: action.payload };
+      return { ...state, selectedRegionId: action.payload, selectedRegionIds: [] };
+    case 'SELECT_REGIONS':
+      return { ...state, selectedRegionIds: action.payload, selectedRegionId: null };
 
     case 'ADD_TRACK': {
       const trackType = action.payload?.trackType ?? 'mono';
@@ -308,13 +331,40 @@ function coreReducer(state: DawState, action: DawAction): DawState {
       const color = trackType === 'stereo'
         ? '#4db8ff'
         : TRACK_DEFAULT_COLORS[monoCount % TRACK_DEFAULT_COLORS.length];
-      const name = trackType === 'stereo' ? 'Playback Track' : 'Audio Track';
+      const name = trackType === 'stereo' ? 'Playback' : 'Audio Track';
       const newTrack = makeTrack(name, color, trackType);
       // Stereo tracks always inserted at the top
       if (trackType === 'stereo') {
         return { ...state, tracks: [newTrack, ...state.tracks] };
       }
       return { ...state, tracks: [...state.tracks, newTrack] };
+    }
+
+    case 'DUPLICATE_TRACK': {
+      const srcTrack = state.tracks.find(t => t.id === action.payload);
+      if (!srcTrack) return state;
+      const stamp = Date.now();
+      const newVersion = makeVersion(1);
+      const newTrack: Track = {
+        ...srcTrack,
+        id: `t_dup_${stamp}`,
+        versions: [newVersion],
+        activeVersionId: newVersion.id,
+      };
+      // Copy all regions from the source track's active version to the new track/version
+      const copiedRegions: Region[] = state.regions
+        .filter(r => r.trackId === srcTrack.id && r.versionId === srcTrack.activeVersionId)
+        .map((r, i) => ({ ...r, id: `r_dup_${stamp}_${i}`, trackId: newTrack.id, versionId: newVersion.id }));
+      const srcIdx = state.tracks.findIndex(t => t.id === srcTrack.id);
+      const newTracks = [...state.tracks.slice(0, srcIdx + 1), newTrack, ...state.tracks.slice(srcIdx + 1)];
+      const newRegions = [...state.regions, ...copiedRegions];
+      return {
+        ...state,
+        tracks: newTracks,
+        regions: newRegions,
+        selectedTrackId: newTrack.id,
+        projectLength: autoProjectLength(state.projectLength, newRegions),
+      };
     }
 
     case 'REORDER_TRACKS':
@@ -365,27 +415,51 @@ function coreReducer(state: DawState, action: DawAction): DawState {
         ),
       };
 
-    case 'ADD_REGION':
-      return { ...state, regions: [...state.regions, action.payload] };
+    case 'ADD_REGION': {
+      const newRegions = [...state.regions, action.payload];
+      return { ...state, regions: newRegions, projectLength: autoProjectLength(state.projectLength, newRegions) };
+    }
 
-    case 'REMOVE_REGION':
-      return { ...state, regions: state.regions.filter(r => r.id !== action.payload) };
+    case 'REMOVE_REGION': {
+      const newRegions = state.regions.filter(r => r.id !== action.payload);
+      return {
+        ...state,
+        regions: newRegions,
+        crossfades: state.crossfades.filter(cf => cf.regionA !== action.payload && cf.regionB !== action.payload),
+        selectedRegionIds: state.selectedRegionIds.filter(id => id !== action.payload),
+        projectLength: autoProjectLength(state.projectLength, newRegions),
+      };
+    }
+
+    case 'ADD_CROSSFADE': {
+      const { regionA, regionB } = action.payload;
+      const existingIdx = state.crossfades.findIndex(
+        cf => (cf.regionA === regionA && cf.regionB === regionB) ||
+              (cf.regionA === regionB && cf.regionB === regionA)
+      );
+      if (existingIdx >= 0) {
+        // Toggle off if same pair exists
+        return { ...state, crossfades: state.crossfades.filter((_, i) => i !== existingIdx) };
+      }
+      return { ...state, crossfades: [...state.crossfades, { id: `cf_${Date.now()}`, regionA, regionB }] };
+    }
+
+    case 'REMOVE_CROSSFADE':
+      return { ...state, crossfades: state.crossfades.filter(cf => cf.id !== action.payload) };
 
     case 'MOVE_REGION': {
       const { regionId, startTime, trackId } = action.payload;
-      return {
-        ...state,
-        regions: state.regions.map(r => {
-          if (r.id !== regionId) return r;
-          const upd: Partial<Region> = {};
-          if (startTime !== undefined) upd.startTime = Math.max(0, startTime);
-          if (trackId !== undefined) {
-            const track = state.tracks.find(t => t.id === trackId);
-            if (track) { upd.trackId = trackId; upd.versionId = track.activeVersionId; }
-          }
-          return { ...r, ...upd };
-        }),
-      };
+      const newRegions = state.regions.map(r => {
+        if (r.id !== regionId) return r;
+        const upd: Partial<Region> = {};
+        if (startTime !== undefined) upd.startTime = Math.max(0, startTime);
+        if (trackId !== undefined) {
+          const track = state.tracks.find(t => t.id === trackId);
+          if (track) { upd.trackId = trackId; upd.versionId = track.activeVersionId; }
+        }
+        return { ...r, ...upd };
+      });
+      return { ...state, regions: newRegions, projectLength: autoProjectLength(state.projectLength, newRegions) };
     }
 
     case 'SPLIT_REGION': {
@@ -451,6 +525,24 @@ function coreReducer(state: DawState, action: DawAction): DawState {
         ),
       };
 
+    case 'SET_REGION_GAIN':
+      return {
+        ...state,
+        regions: state.regions.map(r =>
+          r.id === action.payload.id ? { ...r, gain: action.payload.gain } : r
+        ),
+      };
+
+    case 'SET_POOL_ITEM_UPLOAD_STATUS':
+      return {
+        ...state,
+        poolItems: state.poolItems.map(p =>
+          p.id === action.payload.id
+            ? { ...p, uploadStatus: action.payload.status, ...(action.payload.storagePath && { storagePath: action.payload.storagePath }) }
+            : p
+        ),
+      };
+
     case 'TOGGLE_REGION_MUTE':
       return {
         ...state,
@@ -461,14 +553,12 @@ function coreReducer(state: DawState, action: DawAction): DawState {
 
     case 'TRIM_REGION': {
       const { regionId, startTime, duration, audioOffset } = action.payload;
-      return {
-        ...state,
-        regions: state.regions.map(r =>
-          r.id === regionId
-            ? { ...r, startTime: Math.max(0, startTime), duration: Math.max(0.05, duration), audioOffset }
-            : r
-        ),
-      };
+      const newRegions = state.regions.map(r =>
+        r.id === regionId
+          ? { ...r, startTime: Math.max(0, startTime), duration: Math.max(0.05, duration), audioOffset }
+          : r
+      );
+      return { ...state, regions: newRegions, projectLength: autoProjectLength(state.projectLength, newRegions) };
     }
 
     case 'RENDER_REGIONS': {
@@ -549,10 +639,12 @@ function coreReducer(state: DawState, action: DawAction): DawState {
 
     case 'BOUNCE_REGIONS': {
       const { regionIds, newRegion, newPoolItem } = action.payload;
+      const newRegions = [...state.regions.filter(r => !regionIds.includes(r.id)), newRegion];
       return {
         ...state,
-        regions: [...state.regions.filter(r => !regionIds.includes(r.id)), newRegion],
+        regions: newRegions,
         poolItems: [newPoolItem, ...state.poolItems],
+        projectLength: autoProjectLength(state.projectLength, newRegions),
       };
     }
 
@@ -605,12 +697,16 @@ interface DawContextValue {
   trackPannersRef: React.MutableRefObject<Record<string, StereoPannerNode>>;
   masterGainRef: React.MutableRefObject<GainNode | null>;
   masterAnalyserRef: React.MutableRefObject<AnalyserNode | null>;
+  nativeMasterLevelsRef: React.MutableRefObject<[number, number]>;
 
   // Local Project storage handles (Chrome/Edge File System Access API)
   projectDirHandle: any | null;
   setProjectDirHandle: (handle: any | null) => void;
   audioDirHandle: any | null;
   setAudioDirHandle: (handle: any | null) => void;
+
+  // Set by useAudioEngine so any component can trigger a re-upload by pool item id
+  retryUploadRef: React.MutableRefObject<((poolItemId: string) => void) | null>;
 }
 
 interface DawProviderProps {
@@ -632,11 +728,13 @@ export const DawProvider: React.FC<DawProviderProps> = ({ children, userRole }) 
   const trackAnalysersRef  = useRef<Record<string, AnalyserNode>>({});
   const trackGainsRef      = useRef<Record<string, GainNode>>({});
   const trackPannersRef    = useRef<Record<string, StereoPannerNode>>({});
-  const masterGainRef      = useRef<GainNode | null>(null);
-  const masterAnalyserRef  = useRef<AnalyserNode | null>(null);
+  const masterGainRef           = useRef<GainNode | null>(null);
+  const masterAnalyserRef       = useRef<AnalyserNode | null>(null);
+  const nativeMasterLevelsRef   = useRef<[number, number]>([0, 0]);
 
   const [projectDirHandle, setProjectDirHandle] = React.useState<any | null>(null);
   const [audioDirHandle, setAudioDirHandle] = React.useState<any | null>(null);
+  const retryUploadRef = useRef<((poolItemId: string) => void) | null>(null);
 
   const dispatch = useCallback((action: DawAction) => {
     if (middlewareRef.current) {
@@ -652,8 +750,9 @@ export const DawProvider: React.FC<DawProviderProps> = ({ children, userRole }) 
 
   return (
     <DawContext.Provider value={{ 
-      state, dispatch, originalDispatch, setDispatchMiddleware, currentTimeRef, audioCtxRef, recordingStartTimeRef, animFrameRef, masterStreamRef, livePeaksRef, trackAnalysersRef, trackGainsRef, trackPannersRef, masterGainRef, masterAnalyserRef, userRole,
-      projectDirHandle, setProjectDirHandle, audioDirHandle, setAudioDirHandle
+      state, dispatch, originalDispatch, setDispatchMiddleware, currentTimeRef, audioCtxRef, recordingStartTimeRef, animFrameRef, masterStreamRef, livePeaksRef, trackAnalysersRef, trackGainsRef, trackPannersRef, masterGainRef, masterAnalyserRef, nativeMasterLevelsRef, userRole,
+      projectDirHandle, setProjectDirHandle, audioDirHandle, setAudioDirHandle,
+      retryUploadRef,
     }}>
       {children}
     </DawContext.Provider>

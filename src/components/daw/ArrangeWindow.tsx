@@ -67,12 +67,12 @@ function formatPlayheadTime(secs: number): string {
 }
 
 // ── Component ────────────────────────────────────────────────────────
-const ArrangeWindow = () => {
+const ArrangeWindow = ({ onSeek }: { onSeek?: (t: number) => void }) => {
   const { state, dispatch, currentTimeRef, recordingStartTimeRef, livePeaksRef, audioDirHandle } = useDaw();
-  const { tracks, regions, activeTool, selectedRegionId, selectedTrackId, markers } = state;
+  const { tracks, regions, activeTool, selectedRegionId, selectedRegionIds, selectedTrackId, markers, crossfades } = state;
   const { tempo, isLooping, loopStart, loopEnd, punchIn, punchOut } = state.transport;
 
-  const [zoom, setZoom]           = useState(1);
+  const [zoom, setZoom]           = useState(0.51);
   const pxPerSec                  = BASE_PX_PER_SEC * zoom;
   const pxPerSecRef               = useRef(pxPerSec);
   pxPerSecRef.current             = pxPerSec;
@@ -110,6 +110,87 @@ const ArrangeWindow = () => {
   };
   const applySnapRef = useRef(applySnap);
   applySnapRef.current = applySnap;
+
+  // ── Magnetic snap (hysteresis, screen-space px thresholds) ──────
+  type SnapTarget = {
+    time: number;
+    type: 'grid' | 'clipStart' | 'clipEnd' | 'cursor' | 'marker' | 'loopIn' | 'loopOut' | 'punchIn' | 'punchOut';
+  };
+  const SNAP_ENGAGE_PX  = 10;
+  const SNAP_RELEASE_PX = 18;
+  const snapEngagedRef     = useRef<SnapTarget | null>(null);
+  const snapEngagedTrimRef = useRef<SnapTarget | null>(null);
+  const [snapGuide, setSnapGuide] = useState<SnapTarget | null>(null);
+
+  const findSnapTarget = (rawTime: number, excludeRegionId?: string): SnapTarget | null => {
+    const pps = pxPerSecRef.current;
+    const candidates: SnapTarget[] = [];
+    // Grid
+    const { on, value, tempo: bpm } = snapStateRef.current;
+    if (on && value !== 'Off') {
+      const den     = parseInt(value.split('/')[1], 10);
+      const snapSec = 240 / bpm / den;
+      candidates.push({ time: Math.round(rawTime / snapSec) * snapSec, type: 'grid' });
+    }
+    // Clip edges
+    for (const r of regionsRef.current) {
+      if (r.id === excludeRegionId) continue;
+      candidates.push({ time: r.startTime,              type: 'clipStart' });
+      candidates.push({ time: r.startTime + r.duration, type: 'clipEnd' });
+    }
+    // Play cursor
+    candidates.push({ time: currentTimeRef.current, type: 'cursor' });
+    // Markers
+    for (const m of stateRef.current.markers) {
+      candidates.push({ time: m.time, type: 'marker' });
+    }
+    // Loop / punch locators
+    const tr = stateRef.current.transport;
+    if (tr.isLooping) {
+      candidates.push({ time: tr.loopStart, type: 'loopIn' });
+      candidates.push({ time: tr.loopEnd,   type: 'loopOut' });
+    }
+    if (tr.punchIn  !== null) candidates.push({ time: tr.punchIn,  type: 'punchIn' });
+    if (tr.punchOut !== null) candidates.push({ time: tr.punchOut, type: 'punchOut' });
+
+    let best: SnapTarget | null = null;
+    let bestPx = SNAP_ENGAGE_PX;
+    for (const c of candidates) {
+      const px = Math.abs(c.time - rawTime) * pps;
+      if (px < bestPx) { bestPx = px; best = c; }
+    }
+    return best;
+  };
+  const findSnapTargetRef = useRef(findSnapTarget);
+  findSnapTargetRef.current = findSnapTarget;
+
+  // Shared hysteresis resolver — used inside mousemove handlers
+  const resolveSnap = (
+    rawTime: number,
+    engagedRef: React.MutableRefObject<SnapTarget | null>,
+    bypass: boolean,
+    excludeId?: string,
+  ): number => {
+    if (bypass) {
+      engagedRef.current = null;
+      setSnapGuide(null);
+      return rawTime;
+    }
+    if (engagedRef.current) {
+      const releasePx = Math.abs(rawTime - engagedRef.current.time) * pxPerSecRef.current;
+      if (releasePx <= SNAP_RELEASE_PX) {
+        setSnapGuide(engagedRef.current);
+        return engagedRef.current.time;
+      }
+      engagedRef.current = null;
+    }
+    const hit = findSnapTargetRef.current(rawTime, excludeId);
+    engagedRef.current = hit;
+    setSnapGuide(hit);
+    return hit ? hit.time : rawTime;
+  };
+  const resolveSnapRef = useRef(resolveSnap);
+  resolveSnapRef.current = resolveSnap;
 
   // State ref mirrors for use in closures that can't take React deps
   const stateRef  = useRef(state);
@@ -194,17 +275,11 @@ const ArrangeWindow = () => {
   const [renameInput, setRenameInput]           = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Fade drag ────────────────────────────────────────────────────
-  type FadeDragState = {
-    regionId: string;
-    type: 'fadeIn' | 'fadeOut';
-    origFade: number;
-    origDuration: number;
-    mouseX: number;
-  };
-  const fadeDragRef  = useRef<FadeDragState | null>(null);
-  const [fadingId, setFadingId] = useState<string | null>(null);
-  const [fadePreviews, setFadePreviews] = useState<Record<string, { fadeIn?: number; fadeOut?: number }>>({});
+
+  // ── Lasso selection ──────────────────────────────────────────────
+  type LassoBox = { x1: number; y1: number; x2: number; y2: number };
+  const [lassoBox, setLassoBox] = useState<LassoBox | null>(null);
+  const lassoOriginRef = useRef<{ clientX: number; clientY: number; scrollLeft: number } | null>(null);
 
   // ── Clip right-click context menu ───────────────────────────────
   const [clipMenu, setClipMenu] = useState<{ x: number; y: number; region: Region } | null>(null);
@@ -272,7 +347,11 @@ const ArrangeWindow = () => {
     }
   }, [zoom]);
 
-  const totalDuration = Math.max(180, ...regions.map(r => r.startTime + r.duration + 30));
+  // Project End: stored project length, auto-extended by reducer when clips exceed it.
+  // Timeline always extends 5 minutes past project end so the canvas is effectively infinite.
+  const projectEnd  = state.projectLength;
+  const lastClipEnd = regions.length > 0 ? Math.max(...regions.map(r => r.startTime + r.duration)) : 0;
+  const totalDuration = Math.max(projectEnd + 300, lastClipEnd + 60, 300);
   const totalWidth    = totalDuration * pxPerSec;
   const secondsPerBar = (60 / tempo) * 4;
   const markerCount   = Math.ceil(totalDuration / secondsPerBar) + 1;
@@ -359,8 +438,26 @@ const ArrangeWindow = () => {
         return;
       }
 
-      // X = Split selected region at cursor position (#3 editing reference point)
+      // X = crossfade (multi-select) or split at cursor (single-select)
       if (e.key === 'x' || e.key === 'X') {
+        const selIds = stateRef.current.selectedRegionIds;
+        if (selIds.length >= 2) {
+          // Multi-select: toggle crossfade on every overlapping pair in the selection
+          const selRegions = regionsRef.current.filter(r => selIds.includes(r.id));
+          for (let i = 0; i < selRegions.length; i++) {
+            for (let j = i + 1; j < selRegions.length; j++) {
+              const a = selRegions[i];
+              const b = selRegions[j];
+              if (a.trackId !== b.trackId) continue;
+              const [first, second] = a.startTime <= b.startTime ? [a, b] : [b, a];
+              if ((first.startTime + first.duration) - second.startTime > 0.01) {
+                dispatch({ type: 'ADD_CROSSFADE', payload: { regionA: first.id, regionB: second.id } });
+              }
+            }
+          }
+          return;
+        }
+        // Single-select: X = split at cursor
         const regionId = stateRef.current.selectedRegionId;
         const region   = regionsRef.current.find(r => r.id === regionId);
         if (region) {
@@ -469,6 +566,64 @@ const ArrangeWindow = () => {
               }});
             } catch (err) { console.error('[Bounce Track]', err); }
           })();
+          return;
+        }
+
+        // ── B: lasso (multi-clip) bounce ────────────────────────────
+        const lassoIds = stateRef.current.selectedRegionIds;
+        if (lassoIds.length > 1) {
+          const selRegions = regionsRef.current.filter(r => lassoIds.includes(r.id) && r.audioUrl);
+          if (selRegions.length > 0) {
+            const rangeStart = Math.min(...selRegions.map(r => r.startTime));
+            const rangeEnd   = Math.max(...selRegions.map(r => r.startTime + r.duration));
+            const rangeDur   = rangeEnd - rangeStart;
+            // Place result on the track of the earliest-starting clip
+            const anchorRegion = selRegions.reduce((a, b) => a.startTime <= b.startTime ? a : b);
+            const anchorTrack  = tracksRef.current.find(t => t.id === anchorRegion.trackId);
+            if (anchorTrack) {
+              void (async () => {
+                try {
+                  const SR     = 48000;
+                  const offCtx = new OfflineAudioContext(2, Math.ceil(rangeDur * SR), SR);
+                  await Promise.all(selRegions.map(async r => {
+                    const timeInto = Math.max(0, rangeStart - r.startTime);
+                    const fileOff  = (r.audioOffset ?? 0) + timeInto;
+                    const clipDur  = r.duration - timeInto;
+                    const clipAt   = Math.max(0, r.startTime - rangeStart);
+                    if (clipDur <= 0) return;
+                    const res = await fetch(r.audioUrl);
+                    const buf = await offCtx.decodeAudioData(await res.arrayBuffer());
+                    const src = offCtx.createBufferSource();
+                    src.buffer = buf;
+                    src.connect(offCtx.destination);
+                    src.start(clipAt, fileOff, clipDur);
+                  }));
+                  const rendered   = await offCtx.startRendering();
+                  const { left: peaks, right: peaksR } = await generatePeaksStereo(rendered);
+                  const wavAb      = audioBufferToWav(rendered);
+                  const wavBlob    = new Blob([wavAb], { type: 'audio/wav' });
+                  const stamp      = Date.now();
+                  const bounceName = `Bounce_Selection_${stamp}`;
+                  const newUrl     = await uploadAudioToSupabase(wavBlob, `${bounceName}.wav`) || URL.createObjectURL(wavBlob);
+                  const bncPoolId  = `pool_bnc_${stamp}`;
+                  dispatch({ type: 'BOUNCE_REGIONS', payload: {
+                    regionIds: lassoIds,
+                    newPoolItem: { id: bncPoolId, name: bounceName, audioUrl: newUrl, duration: rangeDur, createdAt: new Date(), waveformPeaks: peaks, waveformPeaksR: peaksR },
+                    newRegion: {
+                      id: `region_bnc_${stamp}`, poolItemId: bncPoolId,
+                      trackId: anchorTrack.id, versionId: anchorTrack.activeVersionId,
+                      startTime: rangeStart, duration: rangeDur, name: bounceName,
+                      audioUrl: newUrl, waveformPeaks: peaks, waveformPeaksR: peaksR,
+                      sourcePeaks: peaks, sourcePeaksR: peaksR,
+                      audioOffset: 0, sourceDuration: rangeDur,
+                      fadeIn: undefined, fadeOut: undefined,
+                    },
+                  }});
+                  dispatch({ type: 'SELECT_REGIONS', payload: [] });
+                } catch (err) { console.error('[Bounce Selection]', err); }
+              })();
+            }
+          }
           return;
         }
 
@@ -609,11 +764,9 @@ const ArrangeWindow = () => {
 
       if (isPlayingRef.current && contentScrollRef.current) {
         const el = contentScrollRef.current;
-        const sl = el.scrollLeft;
         const vw = el.clientWidth;
-        if (x > sl + vw - 80 || x < sl) {
-          el.scrollLeft = Math.max(0, x - 60);
-        }
+        // Keep playhead at ~65% of viewport so content scrolls ahead of it
+        el.scrollLeft = Math.max(0, x - vw * 0.65);
       }
 
       if (isRecordingRef.current && liveRegionRef.current) {
@@ -695,11 +848,7 @@ const ArrangeWindow = () => {
 
       if (dragRef.current.axis === 'h') {
         const rawStart = Math.max(0, dragRef.current.origStart + (e.clientX - dragRef.current.mouseX) / pxPerSecRef.current);
-        // Snap to grid first, then also snap to cursor position (#10 snap reference)
-        let newStart = applySnapRef.current(rawStart);
-        const phTime      = currentTimeRef.current;
-        const snapThresh  = 8 / pxPerSecRef.current; // 8px threshold
-        if (Math.abs(rawStart - phTime) < snapThresh) newStart = phTime;
+        const newStart = resolveSnapRef.current(rawStart, snapEngagedRef, e.ctrlKey, dragRef.current.regionId);
         dragPosRef.current = newStart;
         setDragPreviewStart(newStart);
       } else if (dragRef.current.axis === 'v') {
@@ -739,6 +888,8 @@ const ArrangeWindow = () => {
           }
         }
       }
+      snapEngagedRef.current = null;
+      setSnapGuide(null);
       dragRef.current = null;
       dragTargetTrackIdRef.current = null;
       setDraggingId(null);
@@ -762,24 +913,20 @@ const ArrangeWindow = () => {
       const dx = (e.clientX - tr.mouseX) / pxPerSecRef.current;
       let preview: { startTime: number; duration: number };
       if (tr.edge === 'right') {
-        // Cap at remaining source audio (sourceDuration - audioOffset).
-        // If sourceDuration is unknown (old clip), fall back to origDuration so we never
-        // extend past a boundary we can't verify — the user should re-import or bounce first.
-        const maxDur = tr.origSourceDuration != null
+        const maxDur   = tr.origSourceDuration != null
           ? tr.origSourceDuration - tr.origAudioOffset
           : tr.origDuration;
-        const newDur = Math.min(maxDur, Math.max(0.1, tr.origDuration + dx));
+        const rawEnd   = tr.origStartTime + tr.origDuration + dx;
+        const snappedEnd = resolveSnapRef.current(rawEnd, snapEngagedTrimRef, e.ctrlKey, tr.regionId);
+        const newDur   = Math.min(maxDur, Math.max(0.1, snappedEnd - tr.origStartTime));
         preview = { startTime: tr.origStartTime, duration: newDur };
       } else {
-        // left edge — reveals hidden audio (decreases audioOffset, increases duration)
-        // Apply snap first, then clamp so snap can't push us past the source boundary.
-        const rawStart  = tr.origStartTime + Math.min(tr.origDuration - 0.1, dx);
-        const snapped   = applySnapRef.current(rawStart);
-        // Leftmost allowed: startTime - audioOffset (no audio before source file start)
-        const minStart  = Math.max(0, tr.origStartTime - tr.origAudioOffset);
-        const maxStart  = tr.origStartTime + (tr.origDuration - 0.1);
-        const newStart  = Math.max(minStart, Math.min(maxStart, snapped));
-        const actual    = newStart - tr.origStartTime;
+        const rawStart = tr.origStartTime + Math.min(tr.origDuration - 0.1, dx);
+        const snapped  = resolveSnapRef.current(rawStart, snapEngagedTrimRef, e.ctrlKey, tr.regionId);
+        const minStart = Math.max(0, tr.origStartTime - tr.origAudioOffset);
+        const maxStart = tr.origStartTime + (tr.origDuration - 0.1);
+        const newStart = Math.max(minStart, Math.min(maxStart, snapped));
+        const actual   = newStart - tr.origStartTime;
         preview = { startTime: newStart, duration: tr.origDuration - actual };
       }
       trimPreviewRef.current = preview;
@@ -801,6 +948,8 @@ const ArrangeWindow = () => {
           },
         });
       }
+      snapEngagedTrimRef.current = null;
+      setSnapGuide(null);
       trimRef.current        = null;
       trimPreviewRef.current = null;
       setTrimmingId(null);
@@ -814,47 +963,84 @@ const ArrangeWindow = () => {
     };
   }, [trimmingId, dispatch]);
 
-  // ── Fade drag ───────────────────────────────────────────────────
+
+  // ── Lasso drag ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!fadingId) return;
     const onMove = (e: MouseEvent) => {
-      const fd = fadeDragRef.current;
-      if (!fd) return;
-      const dx = (e.clientX - fd.mouseX) / pxPerSecRef.current;
-      const maxFade = fd.origDuration / 2;
-      let newFade: number;
-      if (fd.type === 'fadeIn') {
-        newFade = Math.max(0, Math.min(maxFade, fd.origFade + dx));
-      } else {
-        newFade = Math.max(0, Math.min(maxFade, fd.origFade - dx));
-      }
-      setFadePreviews(prev => ({
-        ...prev,
-        [fd.regionId]: { ...prev[fd.regionId], [fd.type]: newFade },
-      }));
+      if (!lassoOriginRef.current) return;
+      const { clientX: ox, clientY: oy, scrollLeft: osl } = lassoOriginRef.current;
+      const dx = e.clientX - ox;
+      const dy = e.clientY - oy;
+      // Only start drawing after 5px threshold to preserve click-to-seek
+      if (!lassoBox && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+
+      const contentEl = contentScrollRef.current;
+      if (!contentEl) return;
+      const rect  = contentEl.getBoundingClientRect();
+      const sl    = contentEl.scrollLeft;
+
+      // Coordinates in content-area space (accounts for scroll)
+      const x1 = ox - rect.left + osl;
+      const y1 = oy - rect.top;
+      const x2 = e.clientX - rect.left + sl;
+      const y2 = e.clientY - rect.top;
+
+      setLassoBox({ x1, y1, x2, y2 });
     };
-    const onUp = () => {
-      const fd = fadeDragRef.current;
-      if (fd) {
-        const preview = fadePreviews[fd.regionId];
-        if (preview) {
-          dispatch({
-            type: 'UPDATE_REGION',
-            payload: { id: fd.regionId, updates: { [fd.type]: preview[fd.type] } },
-          });
+
+    const onUp = (e: MouseEvent) => {
+      if (!lassoOriginRef.current) return;
+      const origin = lassoOriginRef.current;
+      lassoOriginRef.current = null;
+
+      if (!lassoBox) {
+        // No drag — treat as click: move playhead
+        const contentEl = contentScrollRef.current;
+        if (contentEl) {
+          const rect = contentEl.getBoundingClientRect();
+          const sl   = contentEl.scrollLeft;
+          const rawTime = Math.max(0, (e.clientX - rect.left + sl) / pxPerSecRef.current);
+          onSeek?.(applySnapRef.current(rawTime));
         }
+        setLassoBox(null);
+        return;
       }
-      fadeDragRef.current = null;
-      setFadingId(null);
-      setFadePreviews({});
+
+      // Compute lasso rect in content coordinates
+      const lx1 = Math.min(lassoBox.x1, lassoBox.x2);
+      const lx2 = Math.max(lassoBox.x1, lassoBox.x2);
+      const ly1 = Math.min(lassoBox.y1, lassoBox.y2);
+      const ly2 = Math.max(lassoBox.y1, lassoBox.y2);
+
+      // Find all regions whose visual rect intersects the lasso
+      const hit: string[] = [];
+      tracksRef.current.forEach((track, ti) => {
+        const trackTop    = getTrackTop(ti);
+        const trackBottom = trackTop + (track.height ?? 80);
+        if (trackBottom < ly1 || trackTop > ly2) return; // track row not in lasso vertically
+        regionsRef.current
+          .filter(r => r.trackId === track.id && r.versionId === track.activeVersionId)
+          .forEach(r => {
+            const rLeft  = r.startTime * pxPerSecRef.current;
+            const rRight = (r.startTime + r.duration) * pxPerSecRef.current;
+            if (rRight >= lx1 && rLeft <= lx2) hit.push(r.id);
+          });
+      });
+
+      if (hit.length > 0) {
+        dispatch({ type: 'SELECT_REGIONS', payload: hit });
+      }
+      setLassoBox(null);
     };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
     return () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
     };
-  }, [fadingId, fadePreviews, dispatch]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lassoBox, dispatch, getTrackTop, onSeek]);
 
   // ── Slip drag ───────────────────────────────────────────────────
   useEffect(() => {
@@ -900,8 +1086,68 @@ const ArrangeWindow = () => {
     };
   }, [slipId, dispatch]);
 
+  // ── Project End drag ────────────────────────────────────────────
+  const projectEndDragRef = useRef<{ startX: number; origEnd: number } | null>(null);
+
+  // Scroll to show the END marker when the user explicitly sets project length from settings.
+  // Skip when it's an auto-calculation driven by clip content (those match max clip end exactly).
+  const prevProjectLengthRef = useRef(state.projectLength);
+  useEffect(() => {
+    if (state.projectLength === prevProjectLengthRef.current) return;
+    prevProjectLengthRef.current = state.projectLength;
+    if (isPlayingRef.current || isRecordingRef.current) return;
+    const autoCalc = regionsRef.current.reduce((m, r) => Math.max(m, r.startTime + r.duration), 0);
+    if (Math.abs(state.projectLength - autoCalc) < 0.5) return; // auto-set from clips, skip scroll
+    const el = contentScrollRef.current;
+    if (!el) return;
+    const endPx = state.projectLength * pxPerSecRef.current;
+    el.scrollLeft = Math.max(0, endPx - el.clientWidth * 0.65);
+  }, [state.projectLength]);
+
   // ── Ruler pointer drag (Cubase-style scrub) ──────────────────────
-  const rulerDraggingRef = useRef(false);
+  const rulerDraggingRef    = useRef(false);
+  const lastScrubTimeRef    = useRef(0);
+  // Edge-scroll loop: when pointer is dragged near/past the left or right edge
+  const scrubPointerXRef    = useRef(0);
+  const scrubScrollLoopRef  = useRef<number | null>(null);
+  const onSeekRef           = useRef(onSeek);
+  useEffect(() => { onSeekRef.current = onSeek; }, [onSeek]);
+
+  const stopScrubEdgeScroll = useCallback(() => {
+    if (scrubScrollLoopRef.current !== null) {
+      cancelAnimationFrame(scrubScrollLoopRef.current);
+      scrubScrollLoopRef.current = null;
+    }
+  }, []);
+
+  const startScrubEdgeScroll = useCallback(() => {
+    if (scrubScrollLoopRef.current !== null) return;
+    const loop = () => {
+      if (!rulerDraggingRef.current) { scrubScrollLoopRef.current = null; return; }
+      const el = contentScrollRef.current;
+      if (!el) { scrubScrollLoopRef.current = null; return; }
+      const rect  = el.getBoundingClientRect();
+      const px    = scrubPointerXRef.current;
+      const ZONE  = 80;   // px from edge where scrolling begins
+      const SPEED = 18;   // max px scrolled per frame
+      let delta = 0;
+      if (px > rect.right - ZONE) {
+        delta = Math.min(SPEED, ((px - (rect.right - ZONE)) / ZONE) * SPEED);
+      } else if (px < rect.left + ZONE) {
+        delta = -Math.min(SPEED, (((rect.left + ZONE) - px) / ZONE) * SPEED);
+      }
+      if (delta !== 0) {
+        el.scrollLeft = Math.max(0, el.scrollLeft + delta);
+        const relX = px - rect.left + el.scrollLeft;
+        const t = Math.max(0, relX / pxPerSecRef.current);
+        currentTimeRef.current = t;
+        dispatch({ type: 'SET_CURRENT_TIME', payload: t });
+        onSeekRef.current?.(t);
+      }
+      scrubScrollLoopRef.current = requestAnimationFrame(loop);
+    };
+    scrubScrollLoopRef.current = requestAnimationFrame(loop);
+  }, [dispatch, currentTimeRef]);
   const [markerDialog, setMarkerDialog] = useState<{
     id: string | null;
     pendingTime?: number;
@@ -931,18 +1177,38 @@ const ArrangeWindow = () => {
     rulerDraggingRef.current = true;
     currentTimeRef.current = t;
     dispatch({ type: 'SET_CURRENT_TIME', payload: t });
-  }, [getTimeFromRulerPointer, currentTimeRef, dispatch, pxPerSec]);
+    onSeek?.(t);
+  }, [getTimeFromRulerPointer, currentTimeRef, dispatch, pxPerSec, onSeek]);
 
   const handleRulerPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!rulerDraggingRef.current) return;
-    const t = getTimeFromRulerPointer(e);
-    currentTimeRef.current = t;
-    dispatch({ type: 'SET_CURRENT_TIME', payload: t });
-  }, [getTimeFromRulerPointer, currentTimeRef, dispatch]);
+    scrubPointerXRef.current = e.clientX;
+    // Let the edge-scroll loop handle time updates when near viewport edges
+    const el   = contentScrollRef.current;
+    const rect = el?.getBoundingClientRect();
+    const ZONE = 80;
+    const nearEdge = rect && (e.clientX > rect.right - ZONE || e.clientX < rect.left + ZONE);
+    if (nearEdge) {
+      startScrubEdgeScroll();
+    } else {
+      const t = getTimeFromRulerPointer(e);
+      currentTimeRef.current = t;
+      dispatch({ type: 'SET_CURRENT_TIME', payload: t });
+      const now = Date.now();
+      if (now - lastScrubTimeRef.current > 80) {
+        lastScrubTimeRef.current = now;
+        onSeek?.(t);
+      }
+    }
+  }, [getTimeFromRulerPointer, currentTimeRef, dispatch, onSeek, startScrubEdgeScroll]);
 
   const handleRulerPointerUp = useCallback(() => {
+    if (rulerDraggingRef.current) {
+      stopScrubEdgeScroll();
+      onSeek?.(currentTimeRef.current);
+    }
     rulerDraggingRef.current = false;
-  }, []);
+  }, [onSeek, currentTimeRef, stopScrubEdgeScroll]);
 
   const confirmMarkerDialog = useCallback(() => {
     if (!markerDialog) return;
@@ -1241,7 +1507,13 @@ const ArrangeWindow = () => {
   // ── Track empty-space click ──────────────────────────────────────
   const handleTrackMouseDown = (e: React.MouseEvent, track: (typeof tracks)[0]) => {
     if (e.button !== 0) return;
-    if (activeTool === 'select') dispatch({ type: 'SELECT_REGION', payload: null });
+    if (activeTool === 'select') {
+      dispatch({ type: 'SELECT_REGION', payload: null });
+      dispatch({ type: 'SELECT_REGIONS', payload: [] });
+      // Record lasso origin — we distinguish click vs drag in the mousemove handler
+      const sl = contentScrollRef.current?.scrollLeft ?? 0;
+      lassoOriginRef.current = { clientX: e.clientX, clientY: e.clientY, scrollLeft: sl };
+    }
     if (activeTool === 'draw') {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const sl = contentScrollRef.current?.scrollLeft ?? 0;
@@ -1499,6 +1771,11 @@ const ArrangeWindow = () => {
             </div>
           ))}
 
+          {/* Project End flag in bar ruler */}
+          <div className="project-end-ruler-flag" style={{ left: projectEnd * pxPerSec }}>
+            <span className="project-end-ruler-label">END</span>
+          </div>
+
           <div ref={playheadRulerRef} className="playhead-marker" style={{ left: 0 }}>
             <div className="playhead-triangle" />
           </div>
@@ -1541,11 +1818,58 @@ const ArrangeWindow = () => {
       >
         <div style={{ width: totalWidth, position: 'relative', minHeight: totalTracksHeight }}>
           <div ref={playheadLineRef} className="playhead-line" style={{ left: 0 }} />
+          {snapGuide && (
+            <div
+              className={`snap-guide snap-guide-${snapGuide.type}`}
+              style={{ left: snapGuide.time * pxPerSec, height: totalTracksHeight }}
+            />
+          )}
           <div className="grid-background" style={gridStyle} />
+
+          {/* Beyond-project-end tint — subtle darkening of the "overflow" area */}
+          <div
+            className="beyond-project-end"
+            style={{
+              left:   projectEnd * pxPerSec,
+              width:  (totalDuration - projectEnd) * pxPerSec,
+              height: totalTracksHeight,
+            }}
+          />
+
+          {/* Project End marker — draggable vertical line */}
+          <div
+            className="project-end-marker"
+            style={{ left: projectEnd * pxPerSec, height: totalTracksHeight }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              e.currentTarget.setPointerCapture(e.pointerId);
+              projectEndDragRef.current = { startX: e.clientX, origEnd: projectEnd };
+            }}
+            onPointerMove={(e) => {
+              if (!projectEndDragRef.current) return;
+              const dx = (e.clientX - projectEndDragRef.current.startX) / pxPerSecRef.current;
+              const newEnd = Math.max(lastClipEnd + 10, 30, projectEndDragRef.current.origEnd + dx);
+              dispatch({ type: 'SET_PROJECT_LENGTH', payload: newEnd });
+            }}
+            onPointerUp={() => { projectEndDragRef.current = null; }}
+            onPointerCancel={() => { projectEndDragRef.current = null; }}
+          >
+            <div className="project-end-label">END</div>
+          </div>
 
           {/* Range selection box */}
           {rangeBox && (
             <div className="range-selection-box" style={{ left: rangeBox.left, width: rangeBox.width, height: totalTracksHeight }} />
+          )}
+
+          {/* Lasso selection box */}
+          {lassoBox && (
+            <div className="lasso-box" style={{
+              left:   Math.min(lassoBox.x1, lassoBox.x2),
+              top:    Math.min(lassoBox.y1, lassoBox.y2),
+              width:  Math.abs(lassoBox.x2 - lassoBox.x1),
+              height: Math.abs(lassoBox.y2 - lassoBox.y1),
+            }} />
           )}
 
           {/* Loop / Punch Overlays */}
@@ -1617,7 +1941,8 @@ const ArrangeWindow = () => {
                                         : draggingId === region.id && dragRef.current?.axis !== 'v' ? dragPreviewStart
                                         : region.startTime;
                     const displayDur     = isTrimming && trimPreview ? trimPreview.duration : region.duration;
-                    const isSelected     = selectedRegionId === region.id;
+                    const isSelected      = selectedRegionId === region.id;
+                    const isLassoSelected = selectedRegionIds.includes(region.id);
                     const isBeingDragged = draggingId === region.id;
                     const isEdgeHovered  = hoverEdge?.regionId === region.id;
 
@@ -1627,10 +1952,12 @@ const ArrangeWindow = () => {
                         data-region-id={region.id}
                         className={[
                           'audio-region',
-                          region.isMuted    ? 'region-muted'    : '',
-                          isBeingDragged    ? 'region-dragging' : '',
-                          isTrimming        ? 'region-trimming' : '',
-                          isSelected        ? 'region-selected'  : '',
+                          region.isMuted    ? 'region-muted'         : '',
+                          isBeingDragged    ? 'region-dragging'      : '',
+                          isTrimming        ? 'region-trimming'      : '',
+                          isSelected        ? 'region-selected'      : '',
+                          isLassoSelected   ? 'region-lasso-selected': '',
+                          (isBeingDragged || isTrimming) && snapGuide ? 'region-snapping' : '',
                         ].filter(Boolean).join(' ')}
                         style={{
                           left:            displayStart * pxPerSec,
@@ -1667,7 +1994,7 @@ const ArrangeWindow = () => {
                         {/* Name bar */}
                         <div
                           className="region-name-bar"
-                          style={{ backgroundColor: region.isMuted ? 'rgba(60,60,60,0.85)' : `${track.color}dd` }}
+                          style={{ backgroundColor: region.isMuted ? 'rgba(60,60,60,0.85)' : '#26272b' }}
                         >
                           {renamingRegionId === region.id ? (
                             <input
@@ -1691,62 +2018,11 @@ const ArrangeWindow = () => {
                             />
                           ) : (
                             <span className="region-name">
-                              {region.isMuted ? '(muted) ' : ''}{region.name}
+                              {region.isMuted ? <span className="region-disabled-label">disabled</span> : null}{region.name}
                             </span>
                           )}
                         </div>
 
-                        {/* Fade-in overlay */}
-                        {(() => {
-                          const fi = fadePreviews[region.id]?.fadeIn ?? region.fadeIn ?? 0;
-                          return fi > 0 ? (
-                            <div className="fade-overlay fade-in-overlay" style={{ width: fi * pxPerSec }} />
-                          ) : null;
-                        })()}
-
-                        {/* Fade-out overlay */}
-                        {(() => {
-                          const fo = fadePreviews[region.id]?.fadeOut ?? region.fadeOut ?? 0;
-                          return fo > 0 ? (
-                            <div className="fade-overlay fade-out-overlay" style={{ width: fo * pxPerSec }} />
-                          ) : null;
-                        })()}
-
-                        {/* Fade-in drag handle */}
-                        <div
-                          className="fade-handle fade-in-handle"
-                          title="Drag to set Fade In"
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            fadeDragRef.current = {
-                              regionId: region.id,
-                              type: 'fadeIn',
-                              origFade: region.fadeIn ?? 0,
-                              origDuration: region.duration,
-                              mouseX: e.clientX,
-                            };
-                            setFadingId(region.id);
-                            setFadePreviews({ [region.id]: { fadeIn: region.fadeIn ?? 0, fadeOut: region.fadeOut ?? 0 } });
-                          }}
-                        />
-
-                        {/* Fade-out drag handle */}
-                        <div
-                          className="fade-handle fade-out-handle"
-                          title="Drag to set Fade Out"
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            fadeDragRef.current = {
-                              regionId: region.id,
-                              type: 'fadeOut',
-                              origFade: region.fadeOut ?? 0,
-                              origDuration: region.duration,
-                              mouseX: e.clientX,
-                            };
-                            setFadingId(region.id);
-                            setFadePreviews({ [region.id]: { fadeIn: region.fadeIn ?? 0, fadeOut: region.fadeOut ?? 0 } });
-                          }}
-                        />
 
                         {region.waveformPeaks.length > 0 && (() => {
                           // Compute live offset + duration so the waveform shows the actual
@@ -1776,33 +2052,44 @@ const ArrangeWindow = () => {
                         {activeTool === 'split' && splitPreview?.regionId === region.id && (
                           <div className="split-preview-line" style={{ left: splitPreview.x }} />
                         )}
+                        {/* Reveal Hidden Audio indicators — show when audio exists outside current trim */}
+                        {(region.audioOffset ?? 0) > 0 && (
+                          <div className="hidden-audio-indicator hidden-audio-left"
+                            title={`Hidden audio: ${region.audioOffset!.toFixed(2)}s trimmed from start — drag left edge to reveal`} />
+                        )}
+                        {region.sourceDuration !== undefined &&
+                          (region.audioOffset ?? 0) + region.duration < region.sourceDuration - 0.01 && (
+                          <div className="hidden-audio-indicator hidden-audio-right"
+                            title={`Hidden audio: ${(region.sourceDuration - (region.audioOffset ?? 0) - region.duration).toFixed(2)}s trimmed from end — drag right edge to reveal`} />
+                        )}
                       </div>
                     );
                   })}
 
-                  {/* Crossfade overlays — rendered where adjacent clips on this track overlap */}
-                  {(() => {
-                    const sorted = [...trackRegions].sort((a, b) => a.startTime - b.startTime);
-                    const overlays: React.ReactNode[] = [];
-                    for (let i = 0; i + 1 < sorted.length; i++) {
-                      const a = sorted[i];
-                      const b = sorted[i + 1];
-                      const overlap = (a.startTime + a.duration) - b.startTime;
-                      if (overlap > 0.01) {
-                        const xfLeft = b.startTime * pxPerSec;
-                        const xfWidth = Math.min(overlap, b.duration) * pxPerSec;
-                        overlays.push(
-                          <div
-                            key={`xfade_${a.id}_${b.id}`}
-                            className="crossfade-overlay"
-                            style={{ left: xfLeft, width: xfWidth }}
-                            title={`Crossfade: ${overlap.toFixed(2)}s`}
-                          />
-                        );
-                      }
-                    }
-                    return overlays;
-                  })()}
+                  {/* Crossfade overlays — rendered for explicit crossfade pairs on this track */}
+                  {crossfades
+                    .map(cf => {
+                      const ra = regions.find(r => r.id === cf.regionA);
+                      const rb = regions.find(r => r.id === cf.regionB);
+                      if (!ra || !rb || ra.trackId !== track.id) return null;
+                      const [first, second] = ra.startTime <= rb.startTime ? [ra, rb] : [rb, ra];
+                      const overlap = (first.startTime + first.duration) - second.startTime;
+                      if (overlap <= 0.01) return null;
+                      return (
+                        <div
+                          key={cf.id}
+                          className="crossfade-zone"
+                          style={{ left: second.startTime * pxPerSec, width: Math.min(overlap, second.duration) * pxPerSec }}
+                          title={`Crossfade: ${overlap.toFixed(2)}s — right-click to remove`}
+                          onContextMenu={e => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            dispatch({ type: 'REMOVE_CROSSFADE', payload: cf.id });
+                          }}
+                        />
+                      );
+                    })
+                  }
 
                   {/* Vertical-drag ghost preview on target track */}
                   {isVDragTarget && draggedRegion && dragRef.current?.axis !== 'h' && (
@@ -1877,16 +2164,14 @@ const ArrangeWindow = () => {
               },
             },
             {
-              label: 'Duplicate',
+              label: 'Duplicate Track',
               onClick: () => {
-                const dup: Region = { ...clipMenu.region, id: `region_dup_${Date.now()}`, startTime: clipMenu.region.startTime + clipMenu.region.duration };
-                dispatch({ type: 'ADD_REGION', payload: dup });
-                dispatch({ type: 'SELECT_REGION', payload: dup.id });
+                dispatch({ type: 'DUPLICATE_TRACK', payload: clipMenu.region.trackId });
                 setClipMenu(null);
               },
             },
             {
-              label: clipMenu.region.isMuted ? 'Unmute' : 'Mute',
+              label: clipMenu.region.isMuted ? 'Enable Clip' : 'Disable Clip',
               onClick: () => { dispatch({ type: 'TOGGLE_REGION_MUTE', payload: clipMenu.region.id }); setClipMenu(null); },
             },
             {

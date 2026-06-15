@@ -67,14 +67,75 @@
   padding: 0;
 }
 
-.routing-box {
-  background-color: #2a2b2e;
+.routing-body {
+  gap: 8px;
+}
+
+.routing-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.routing-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #555;
+  letter-spacing: 0.08em;
+  min-width: 24px;
+  flex-shrink: 0;
+}
+
+.routing-select {
+  flex: 1;
+  min-width: 0;
+  background: #222325;
   border: 1px solid #333;
-  padding: 4px 8px;
-  font-size: 11px;
-  border-radius: 3px;
   color: #00ffcc;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  outline: none;
   cursor: pointer;
+  appearance: auto;
+}
+
+.routing-select:hover:not(:disabled) {
+  border-color: #444;
+  background: #26272a;
+}
+
+.routing-select:focus {
+  border-color: rgba(0, 255, 204, 0.4);
+}
+
+.routing-select:disabled {
+  color: #444;
+  cursor: default;
+}
+
+.routing-type-row {
+  gap: 10px;
+}
+
+.routing-radio {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #888;
+  cursor: pointer;
+  user-select: none;
+}
+
+.routing-radio input[type='radio'] {
+  accent-color: #00ffcc;
+  cursor: pointer;
+  margin: 0;
+}
+
+.routing-radio:has(input:checked) {
+  color: #00ffcc;
 }
 
 .insert-slot {

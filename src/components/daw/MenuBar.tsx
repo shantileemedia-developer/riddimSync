@@ -4,7 +4,7 @@ import { initialState } from '../../context/DawContext';
 import type { Region, PoolItem } from '../../context/DawContext';
 import { supabase } from '../../lib/supabaseClient';
 import { saveToAudioFolder, generatePeaksStereo } from '../../utils/audioUtils';
-import { exportToWav, exportStems, consolidateTrack } from '../../utils/exportUtils';
+import { exportToWav, exportStems, consolidateTrack, bounceRegion, cropRegion, exportBetweenLocators } from '../../utils/exportUtils';
 import './MenuBar.css';
 
 interface MenuItem {
@@ -23,6 +23,7 @@ interface Menu {
 interface MenuBarProps {
   onOpenAudioPrefs?: () => void;
   onCloseProject?: () => void;
+  onToggleLyrics?: () => void;
 }
 
 const SHORTCUT_LIST = [
@@ -33,7 +34,7 @@ const SHORTCUT_LIST = [
   { key: 'Ctrl+Shift+Z',    action: 'Redo' },
   { key: 'Ctrl+S',          action: 'Save Project' },
   { key: 'Ctrl+Shift+S',    action: 'Save As…' },
-  { key: 'Ctrl+L',          action: 'Toggle Loop' },
+  { key: 'Y',               action: 'Toggle Loop' },
   { key: 'Ctrl+M',          action: 'Toggle Metronome' },
   { key: 'Ctrl+A',          action: 'Select All Clips' },
   { key: 'F4',              action: 'Audio Setup' },
@@ -56,16 +57,16 @@ const SHORTCUT_LIST = [
   { key: 'X',               action: 'Split Clip at Cursor' },
   { key: 'Double-click clip', action: 'Rename Clip (Select tool)' },
   { key: 'Drag fade knob',  action: 'Set Fade In / Fade Out' },
+  { key: 'Alt+N',           action: 'Toggle Lyrics View' },
 ];
 
 const MenuBar: React.FC<MenuBarProps> = ({
-  onOpenAudioPrefs, onCloseProject,
+  onOpenAudioPrefs, onCloseProject, onToggleLyrics,
 }) => {
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const [localToast, setLocalToast] = useState<string | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [showNotepad, setShowNotepad] = useState(false);
   const [showProjectSetup, setShowProjectSetup] = useState(false);
   const [showProjectLength, setShowProjectLength] = useState(false);
   const [projectLengthMin, setProjectLengthMin] = useState(() => {
@@ -76,9 +77,22 @@ const MenuBar: React.FC<MenuBarProps> = ({
     const saved = localStorage.getItem('sd_projectLength');
     return saved ? Number(saved) % 60 : 0;
   });
-  const [notepadText, setNotepadText] = useState(() => localStorage.getItem('sd_notepad') || '');
   const [projectTempo, setProjectTempo] = useState(0);
   const [exportProgress, setExportProgress] = useState<string | null>(null);
+
+  // Open Recent — store last 5 project names in localStorage
+  const [recentProjects, setRecentProjects] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('sd_recentProjects') || '[]'); } catch { return []; }
+  });
+
+  const addToRecent = useCallback((name: string) => {
+    setRecentProjects(prev => {
+      const filtered = prev.filter(n => n !== name);
+      const updated  = [name, ...filtered].slice(0, 5);
+      localStorage.setItem('sd_recentProjects', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
 
   const barRef = useRef<HTMLDivElement>(null);
   const clipboardRef = useRef<Region | null>(null);
@@ -102,10 +116,11 @@ const MenuBar: React.FC<MenuBarProps> = ({
       const w = await fh.createWritable();
       await w.write(JSON.stringify(state, null, 2));
       await w.close();
+      addToRecent(dirHandle.name);
       toast('Project saved.');
     } catch (err) { console.error('Save error:', err); toast('Save failed.'); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectDirHandle, state, toast]);
+  }, [projectDirHandle, state, toast, addToRecent]);
 
   const handleSaveAs = useCallback(async () => {
     if (!('showDirectoryPicker' in window)) {
@@ -116,18 +131,21 @@ const MenuBar: React.FC<MenuBarProps> = ({
       // @ts-ignore
       const dh = await window.showDirectoryPicker({ mode: 'readwrite' });
       setProjectDirHandle(dh);
-      const adh = await dh.getDirectoryHandle('Audio', { create: true });
+      const adh = await dh.getDirectoryHandle('Audio',   { create: true });
+      await dh.getDirectoryHandle('Renders', { create: true });
+      await dh.getDirectoryHandle('Exports', { create: true });
       setAudioDirHandle(adh);
       dispatch({ type: 'RENAME_PROJECT', payload: dh.name });
       const fh = await dh.getFileHandle('project.json', { create: true });
       const w = await fh.createWritable();
       await w.write(JSON.stringify({ ...state, projectName: dh.name }, null, 2));
       await w.close();
+      addToRecent(dh.name);
       toast(`Saved to: ${dh.name}`);
     } catch (err: any) {
       if (err.name !== 'AbortError') alert('Failed to save project. Grant folder permissions and try again.');
     }
-  }, [state, setProjectDirHandle, setAudioDirHandle, toast]);
+  }, [state, setProjectDirHandle, setAudioDirHandle, toast, addToRecent]);
 
 
   const handleOpenProject = useCallback(async () => {
@@ -294,6 +312,20 @@ const MenuBar: React.FC<MenuBarProps> = ({
 
   // ── Export ───────────────────────────────────────────────────────────
 
+  const handleExportBetweenLocators = useCallback(async () => {
+    try {
+      setExportProgress('Rendering export range…');
+      await exportBetweenLocators(state, projectName, pct => {
+        setExportProgress(`Rendering… ${Math.round(pct * 100)}%`);
+      });
+      toast('Export complete.');
+    } catch (err: any) {
+      toast(`Export failed: ${err?.message ?? err}`);
+    } finally {
+      setExportProgress(null);
+    }
+  }, [state, projectName, toast]);
+
   const handleExportMixdown = useCallback(async () => {
     try {
       setExportProgress('Rendering mixdown…');
@@ -339,6 +371,44 @@ const MenuBar: React.FC<MenuBarProps> = ({
     }
   }, [state, toast]);
 
+  const handleBounceRegion = useCallback(async () => {
+    const regionId = state.selectedRegionId;
+    if (!regionId) { toast('Select a region first.'); return; }
+    try {
+      setExportProgress('Bouncing region…');
+      const result = await bounceRegion(state, regionId, msg => setExportProgress(msg));
+      if (!result) { toast('Bounce failed — region has no audio.'); return; }
+      const url = URL.createObjectURL(result.blob);
+      const a   = document.createElement('a');
+      a.href = url; a.download = `${result.name}.wav`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      toast(`Bounced: ${result.name}`);
+    } catch (err: any) {
+      toast(`Bounce failed: ${err?.message ?? err}`);
+    } finally {
+      setExportProgress(null);
+    }
+  }, [state, toast]);
+
+  const handleCropRegion = useCallback(async () => {
+    const regionId = state.selectedRegionId;
+    if (!regionId) { toast('Select a region first.'); return; }
+    try {
+      setExportProgress('Cropping region…');
+      const result = await cropRegion(state, regionId, msg => setExportProgress(msg));
+      if (!result) { toast('Crop failed — region has no audio.'); return; }
+      const url = URL.createObjectURL(result.blob);
+      const a   = document.createElement('a');
+      a.href = url; a.download = `${result.name}.wav`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      toast(`Cropped: ${result.name}`);
+    } catch (err: any) {
+      toast(`Crop failed: ${err?.message ?? err}`);
+    } finally {
+      setExportProgress(null);
+    }
+  }, [state, toast]);
+
   // ── Seek ─────────────────────────────────────────────────────────────
 
   const handleRewind = useCallback(() => {
@@ -361,7 +431,19 @@ const MenuBar: React.FC<MenuBarProps> = ({
       items: [
         { label: 'New Project',           shortcut: 'Ctrl+N',       onClick: handleNewProject },
         { label: 'Open Project…',         shortcut: 'Ctrl+O',       onClick: handleOpenProject },
-        { label: 'Open Recent',           disabled: true },
+        ...(recentProjects.length === 0
+          ? [{ label: 'Open Recent', disabled: true }]
+          : [
+              { label: 'Open Recent ▸', disabled: true },
+              ...recentProjects.map(name => ({
+                label: `  ${name}`,
+                onClick: () => {
+                  toast(`Navigate to "${name}" in the folder picker.`);
+                  handleOpenProject();
+                },
+              })),
+            ]
+        ),
         { separator: true, label: '' },
         { label: 'Close Project',         onClick: onCloseProject ?? (() => toast('No session to close.')) },
         { separator: true, label: '' },
@@ -370,9 +452,10 @@ const MenuBar: React.FC<MenuBarProps> = ({
         { separator: true, label: '' },
         { label: 'Import Audio File…',                              onClick: handleImportAudio },
         { separator: true, label: '' },
-        { label: 'Export Mixdown…',    onClick: handleExportMixdown },
-        { label: 'Export Stems…',      onClick: handleExportStems },
-        { label: 'Consolidate Track…', onClick: handleConsolidateTrack },
+        { label: 'Export Mixdown…',            onClick: handleExportMixdown },
+        { label: 'Export Between Locators…',   onClick: handleExportBetweenLocators },
+        { label: 'Export Stems…',              onClick: handleExportStems },
+        { label: 'Consolidate Track…',         onClick: handleConsolidateTrack },
         { separator: true, label: '' },
         { label: 'Sign Out', onClick: async () => { await supabase.auth.signOut(); window.location.reload(); } },
         { label: 'Quit', shortcut: 'Ctrl+Q', onClick: () => { if (confirm('Quit StudioDESK?')) window.close(); } },
@@ -392,6 +475,9 @@ const MenuBar: React.FC<MenuBarProps> = ({
         { separator: true, label: '' },
         { label: 'Select All Clips', shortcut: 'Ctrl+A', onClick: handleSelectAll },
         { label: 'Deselect All',                         onClick: () => dispatch({ type: 'SELECT_REGION', payload: null }) },
+        { separator: true, label: '' },
+        { label: 'Bounce Region…',  shortcut: 'B',       onClick: handleBounceRegion, disabled: !state.selectedRegionId },
+        { label: 'Crop Region…',                         onClick: handleCropRegion,   disabled: !state.selectedRegionId },
       ],
     },
     {
@@ -399,7 +485,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
       items: [
         { label: 'Project Setup…',      onClick: () => { setProjectTempo(state.transport.tempo); setShowProjectSetup(true); } },
         { label: 'Project Properties…', onClick: () => { setProjectTempo(state.transport.tempo); setShowProjectSetup(true); } },
-        { label: 'Notepad',             onClick: () => setShowNotepad(true) },
+        { label: 'Lyrics View',          shortcut: 'Alt+N', onClick: onToggleLyrics },
         { separator: true, label: '' },
         { label: 'Add Audio Track',     onClick: () => { dispatch({ type: 'ADD_TRACK', payload: { trackType: 'mono' } }); toast('Audio track added.'); } },
         { label: 'Add Playback Track',  onClick: () => { dispatch({ type: 'ADD_TRACK', payload: { trackType: 'stereo' } }); toast('Playback track added.'); } },
@@ -468,6 +554,17 @@ const MenuBar: React.FC<MenuBarProps> = ({
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
+
+  // Auto-save every 5 minutes when a project folder is open
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+  useEffect(() => {
+    if (!projectDirHandle) return;
+    const id = setInterval(() => { handleSaveRef.current(); }, 5 * 60 * 1000);
+    return () => clearInterval(id);
+  // Re-run only when the project dir changes, not on every state update
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectDirHandle]);
 
   const toggleMenu = useCallback((idx: number) => {
     setOpenMenu(prev => (prev === idx ? null : idx));
@@ -586,7 +683,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
               Built with React 19, Electron 42, and WebRTC.
             </p>
             <p style={{ color: '#666', fontSize: 12, marginTop: 12 }}>
-              © 2025 Shantel Bradford. All rights reserved.
+              © 2026 SHANTILEE MEDIA. All rights reserved.
             </p>
             <div className="menu-modal-footer">
               <button className="menu-modal-btn primary" onClick={() => setShowAbout(false)}>Close</button>
@@ -610,30 +707,6 @@ const MenuBar: React.FC<MenuBarProps> = ({
             </div>
             <div className="menu-modal-footer">
               <button className="menu-modal-btn primary" onClick={() => setShowShortcuts(false)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Notepad modal ── */}
-      {showNotepad && (
-        <div className="menu-modal-overlay" onClick={() => setShowNotepad(false)}>
-          <div className="menu-modal notepad-modal" onClick={e => e.stopPropagation()}>
-            <h2 className="menu-modal-title">Project Notepad</h2>
-            <textarea
-              className="notepad-textarea"
-              value={notepadText}
-              onChange={e => setNotepadText(e.target.value)}
-              placeholder="Session notes, chord charts, lyrics, BPM, key…"
-              rows={12}
-            />
-            <div className="menu-modal-footer">
-              <button className="menu-modal-btn secondary" onClick={() => setShowNotepad(false)}>Cancel</button>
-              <button className="menu-modal-btn primary" onClick={() => {
-                localStorage.setItem('sd_notepad', notepadText);
-                setShowNotepad(false);
-                toast('Notepad saved.');
-              }}>Save & Close</button>
             </div>
           </div>
         </div>

@@ -51,7 +51,21 @@
 
 /* ── Region states ──────────────────────────────── */
 .region-muted {
-  opacity: 0.45;
+  opacity: 0.38;
+}
+
+.region-disabled-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #ff6b6b;
+  background: rgba(255, 60, 60, 0.18);
+  border: 1px solid rgba(255, 60, 60, 0.35);
+  border-radius: 2px;
+  padding: 0 3px;
+  margin-right: 4px;
+  line-height: 1.4;
 }
 
 .region-dragging {
@@ -64,6 +78,22 @@
   outline: 2px solid rgba(255,255,255,0.85);
   outline-offset: -2px;
   z-index: 3;
+}
+
+.region-lasso-selected {
+  outline: 2px solid rgba(0, 220, 180, 0.9);
+  outline-offset: -2px;
+  z-index: 3;
+}
+
+/* ── Lasso rubber-band box ──────────────────────── */
+.lasso-box {
+  position: absolute;
+  border: 1.5px dashed rgba(0, 220, 180, 0.85);
+  background: rgba(0, 220, 180, 0.08);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 100;
 }
 
 /* ── Track drop-target highlight ────────────────── */
@@ -613,6 +643,56 @@
   box-shadow: 0 0 4px rgba(0, 255, 204, 0.35);
 }
 
+/* ── Magnetic snap guide ──────────────────────────────── */
+.snap-guide {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  pointer-events: none;
+  z-index: 48;
+}
+.snap-guide-grid     { background: rgba(255, 255, 255, 0.7);  box-shadow: 0 0 3px rgba(255,255,255,0.3); }
+.snap-guide-clipStart,
+.snap-guide-clipEnd  { background: rgba(0, 220, 180, 1);      box-shadow: 0 0 4px rgba(0,220,180,0.5); }
+.snap-guide-cursor   { background: rgba(255, 210, 50, 1);     box-shadow: 0 0 4px rgba(255,210,50,0.5); }
+.snap-guide-marker   { background: rgba(190, 120, 255, 1);    box-shadow: 0 0 4px rgba(190,120,255,0.5); }
+.snap-guide-loopIn,
+.snap-guide-loopOut  { background: rgba(60, 200, 80, 1);      box-shadow: 0 0 4px rgba(60,200,80,0.5); }
+.snap-guide-punchIn,
+.snap-guide-punchOut { background: rgba(255, 80, 80, 1);      box-shadow: 0 0 4px rgba(255,80,80,0.5); }
+
+/* Clip outline when magnetically locked to a snap target */
+.region-snapping {
+  box-shadow: 0 0 0 1.5px rgba(0, 220, 180, 0.85) inset, 0 0 6px rgba(0,220,180,0.25) !important;
+  z-index: 6 !important;
+}
+
+/* ── Reveal Hidden Audio edge indicators ──────────────────────────── */
+/* Small chevron triangles on clip edges when trimmed audio exists beyond */
+.hidden-audio-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 7;
+}
+.hidden-audio-left {
+  left: 2px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 6px solid rgba(255, 200, 50, 0.85);
+  filter: drop-shadow(0 0 2px rgba(255,200,50,0.5));
+}
+.hidden-audio-right {
+  right: 2px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid rgba(255, 200, 50, 0.85);
+  filter: drop-shadow(0 0 2px rgba(255,200,50,0.5));
+}
+
 /* Region under cursor — subtle highlight as playhead passes through */
 .region-under-cursor {
   filter: brightness(1.35) !important;
@@ -626,6 +706,62 @@
   right: 0;
   bottom: 0;
   z-index: 0;
+}
+
+/* ── Infinite timeline: project-end visuals ──────────────────────── */
+
+.beyond-project-end {
+  position: absolute;
+  top: 0;
+  background: rgba(0, 0, 0, 0.3);
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Invisible drag target — wider hit area, only shows faint amber on hover */
+.project-end-marker {
+  position: absolute;
+  top: 0;
+  width: 10px;
+  background: transparent;
+  cursor: ew-resize;
+  z-index: 4;
+  transform: translateX(-5px);
+}
+
+.project-end-marker:hover,
+.project-end-marker:active {
+  background: rgba(255, 200, 60, 0.12);
+}
+
+/* END label hidden — boundary is communicated by the tinted area */
+.project-end-label {
+  display: none;
+}
+
+/* END flag in bar ruler — invisible line, text label only */
+.project-end-ruler-flag {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+
+.project-end-ruler-label {
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  transform: translateY(-50%);
+  color: rgba(255, 200, 60, 0.5);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  white-space: nowrap;
+  user-select: none;
 }
 
 .arrange-tracks {
@@ -768,78 +904,21 @@
   white-space: nowrap;
 }
 
-/* ── Fade overlays ──────────────────────────────────── */
-.fade-overlay {
+/* ── Crossfade zone — explicit crossfade between two overlapping clips ── */
+.crossfade-zone {
   position: absolute;
-  top: 0;
-  height: 100%;
-  pointer-events: none;
-  z-index: 3;
-}
-
-.fade-in-overlay {
-  left: 0;
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.42), transparent);
-  border-radius: 3px 0 0 3px;
-}
-
-.fade-out-overlay {
-  right: 0;
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.42), transparent);
-  border-radius: 0 3px 3px 0;
-}
-
-/* ── Fade drag handles (tiny knob at the top of each fade boundary) ── */
-.fade-handle {
-  position: absolute;
-  top: 0;
-  width: 10px;
-  height: 100%;
-  cursor: ew-resize;
-  z-index: 6;
-  pointer-events: all;
-}
-
-.fade-in-handle {
-  left: 0;
-}
-
-.fade-out-handle {
-  right: 0;
-}
-
-.fade-handle::before {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.75);
-  box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
-  transition: transform 0.1s;
-}
-
-.fade-handle:hover::before {
-  transform: translateX(-50%) scale(1.4);
-  background: #00ffcc;
-}
-
-/* ── Crossfade overlay — renders at the overlap zone between two clips ── */
-.crossfade-overlay {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  pointer-events: none;
+  top: 2px;
+  bottom: 2px;
+  pointer-events: auto;
   z-index: 4;
-  /* X pattern drawn as two crossing diagonal gradients */
+  cursor: context-menu;
+  /* Classic X crossfade pattern — two diagonal gradients crossing */
   background:
-    linear-gradient(to bottom right, rgba(0, 220, 180, 0.18) 45%, transparent 55%),
-    linear-gradient(to bottom left,  rgba(0, 220, 180, 0.18) 45%, transparent 55%);
-  border-left:  1px solid rgba(0, 220, 180, 0.45);
-  border-right: 1px solid rgba(0, 220, 180, 0.45);
+    linear-gradient(to bottom-right, rgba(0, 220, 180, 0.28) 0%, transparent 50%),
+    linear-gradient(to top-right,    rgba(0, 220, 180, 0.28) 0%, transparent 50%);
+  border-left:  1px solid rgba(0, 220, 180, 0.55);
+  border-right: 1px solid rgba(0, 220, 180, 0.55);
+  border-radius: 2px;
 }
 
 /* ── Clip rename inline input ───────────────────────── */

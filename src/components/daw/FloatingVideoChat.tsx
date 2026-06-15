@@ -1,9 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Video, Mic, MicOff, VideoOff, Minimize2, X, PhoneCall, MessageSquare, MonitorPlay, MonitorX } from 'lucide-react';
 import { useWebRTC } from '../../hooks/useWebRTC';
-import { useDaw } from '../../context/DawContext';
-import { useAudioEngine } from '../../hooks/useAudioEngine';
 import type { RemoteInputEvent } from '../../types/remote';
 import './FloatingVideoChat.css';
 
@@ -12,8 +10,11 @@ interface FloatingVideoChatProps {
   userId: string;
   roomCode: string;
   onInputEvent?: (event: RemoteInputEvent) => void;
-  /** active, sendFn, remoteScreenStream */
-  onRcStateChange?: (active: boolean, sendFn: ((e: RemoteInputEvent) => void) | null, screenStream: MediaStream | null) => void;
+  /** active, sendFn, remoteScreenStream, viewOnly */
+  onRcStateChange?: (active: boolean, sendFn: ((e: RemoteInputEvent) => void) | null, screenStream: MediaStream | null, viewOnly: boolean) => void;
+  /** Stable refs from DawContext — passed as props to avoid context subscription inside this component */
+  masterStreamRef: React.MutableRefObject<MediaStreamAudioDestinationNode | null>;
+  audioCtxRef: React.MutableRefObject<AudioContext | null>;
 }
 
 // ── Ringtone synthesized via Web Audio ───────────────────────────────────────
@@ -81,7 +82,7 @@ function useRingtone(isIncoming: boolean, isOutgoing: boolean) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
-  userRole, userId, roomCode, onInputEvent, onRcStateChange,
+  userRole, userId, roomCode, onInputEvent, onRcStateChange, masterStreamRef, audioCtxRef,
 }) => {
   const [isMinimized, setIsMinimized] = useState(true);
   const [showChat, setShowChat] = useState(false);
@@ -89,6 +90,7 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
   const [size, setSize] = useState<{ width: number; height: number }>({ width: 320, height: 0 });
   const [monitorVolume, setMonitorVolume] = useState(0.7);
   const [rcDenied, setRcDenied] = useState(false);
+  const [rcAudioDeviceConsent, setRcAudioDeviceConsent] = useState(false);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [showLocalCam, setShowLocalCam] = useState(true);
   const previewStreamRef = useRef<MediaStream | null>(null);
@@ -96,8 +98,12 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
   const resizeRef = useRef<{ startX: number; startY: number; initW: number; initH: number; el: HTMLElement } | null>(null);
   const widgetRef = useRef<HTMLDivElement>(null);
 
-  const { masterStreamRef, audioCtxRef } = useDaw();
-  const { initAudioCtx } = useAudioEngine();
+  const initAudioCtx = () => {
+    if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+      audioCtxRef.current = new AudioContext({ sampleRate: 48000 });
+    }
+    return audioCtxRef.current;
+  };
 
   const monitorGainRef   = useRef<GainNode | null>(null);
   const monitorSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -109,8 +115,11 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
     ring, acceptCall, declineCall, sendMessage,
     endCall, toggleMic, toggleVideo,
     rcRequested, rcActive,
+    rcEngineerName, rcViewOnly,
     requestRemoteControl, startScreenShare, stopRemoteControl,
+    respondToRcPermission,
     sendInputEvent,
+    switchCallAudioBus, activeCallBus,
   } = useWebRTC({
     roomCode,
     userId,
@@ -178,8 +187,26 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
   useEffect(() => { if (!rcRequested) setRcDenied(false); }, [rcRequested]);
 
   useEffect(() => {
-    onRcStateChange?.(rcActive, rcActive ? sendInputEvent : null, rcActive ? remoteScreenStream : null);
-  }, [rcActive, sendInputEvent, onRcStateChange, remoteScreenStream]);
+    onRcStateChange?.(rcActive, rcActive ? sendInputEvent : null, rcActive ? remoteScreenStream : null, rcViewOnly);
+  }, [rcActive, sendInputEvent, onRcStateChange, remoteScreenStream, rcViewOnly]);
+
+  // Artist: broadcast cursor position to engineer while RC is active (~30 fps)
+  useEffect(() => {
+    if (!rcActive || userRole !== 'artist') return;
+    let lastSent = 0;
+    const onMouseMove = (e: MouseEvent) => {
+      const now = Date.now();
+      if (now - lastSent < 33) return;
+      lastSent = now;
+      sendInputEvent({
+        type: 'artist-cursor',
+        nx: e.clientX / window.innerWidth,
+        ny: e.clientY / window.innerHeight,
+      });
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    return () => window.removeEventListener('mousemove', onMouseMove);
+  }, [rcActive, userRole, sendInputEvent]);
 
   // ── Camera preview — starts when widget opens, releases when call goes active ──
   useEffect(() => {
@@ -290,7 +317,7 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
     document.body,
   ) : null;
 
-  // ── RC consent — fullscreen portal, shows regardless of widget state ────────
+  // ── RC permission dialog — fullscreen portal, shown to artist on RC request ─
   const rcConsentModal = rcRequested && !rcDenied && userRole === 'artist' ? createPortal(
     <div className="rc-consent-overlay">
       <div className="rc-consent-card">
@@ -299,11 +326,29 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
         </div>
         <h3 className="rc-consent-title">Remote Control Request</h3>
         <p className="rc-consent-body">
-          The engineer is requesting full remote control of your session.
+          <strong>{rcEngineerName}</strong> is requesting control of your session.
         </p>
+        <label className="rc-audio-consent-row">
+          <input
+            type="checkbox"
+            checked={rcAudioDeviceConsent}
+            onChange={e => setRcAudioDeviceConsent(e.target.checked)}
+          />
+          <span>Allow engineer to modify audio settings</span>
+        </label>
         <div className="rc-consent-actions">
-          <button className="rc-consent-btn decline" onClick={() => setRcDenied(true)}>Deny</button>
-          <button className="rc-consent-btn accept" onClick={() => { setRcDenied(false); startScreenShare(); }}>Allow</button>
+          <button className="rc-consent-btn decline"
+            onClick={() => { setRcDenied(true); respondToRcPermission('denied', false); }}>
+            Cancel
+          </button>
+          <button className="rc-consent-btn view-only"
+            onClick={() => { respondToRcPermission('view', rcAudioDeviceConsent); }}>
+            View Only
+          </button>
+          <button className="rc-consent-btn accept"
+            onClick={() => { respondToRcPermission('full', rcAudioDeviceConsent); }}>
+            Allow Full Control
+          </button>
         </div>
       </div>
     </div>,
@@ -466,11 +511,25 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
                 <span style={{ marginLeft: 6, fontSize: 12 }}>{isCalling ? 'Cancel' : 'Call'}</span>
               </button>
             )}
+            {/* Engineer: monitor source selector — which DAW bus feeds the call */}
+            {userRole === 'engineer' && callActive && window.audioEngine && (
+              <select
+                className="control-btn monitor-bus-select"
+                value={activeCallBus ?? 'mic-input'}
+                onChange={e => switchCallAudioBus(e.target.value as any)}
+                title="Call audio source"
+                style={{ fontSize: 11, padding: '2px 4px', height: 32, cursor: 'pointer' }}
+              >
+                <option value="mic-input">Mic Input</option>
+                <option value="playback-mix">Playback Mix</option>
+                <option value="master-output">Master Out</option>
+              </select>
+            )}
             {/* RC button — always available for engineer, no call required */}
             {userRole === 'engineer' && (
               <button
                 className={`control-btn rc-btn ${rcActive ? 'active' : ''}`}
-                onClick={rcActive ? stopRemoteControl : requestRemoteControl}
+                onClick={rcActive ? stopRemoteControl : () => requestRemoteControl(userId)}
                 title={rcActive ? 'Stop remote control' : 'Request remote control'}
               >
                 {rcActive ? <MonitorX size={18} /> : <MonitorPlay size={18} />}
@@ -515,4 +574,4 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
   );
 };
 
-export default FloatingVideoChat;
+export default memo(FloatingVideoChat);

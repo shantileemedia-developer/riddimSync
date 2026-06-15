@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import './DawWorkspace.css';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
+import { useNativeAudioEngine } from '../../hooks/useNativeAudioEngine';
 import { useDawSync } from '../../hooks/useDawSync';
 import { useDaw } from '../../context/DawContext';
 import { useRemoteControlReplay } from '../../hooks/useRemoteControl';
@@ -18,6 +19,7 @@ import FloatingVideoChat from './FloatingVideoChat';
 import RemoteControlOverlay from './RemoteControlOverlay';
 import MixerPanel from './MixerPanel';
 import AudioMIDIPreferencesDialog from './AudioMIDIPreferencesDialog';
+import LyricsPanel from './LyricsPanel';
 import { supabase } from '../../lib/supabaseClient';
 
 interface DawWorkspaceProps {
@@ -31,17 +33,21 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
   const [showMixer, setShowMixer] = useState(true);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showAudioPrefs, setShowAudioPrefs] = useState(false);
+  const [showLyrics, setShowLyrics] = useState(false);
   const [onlineCount, setOnlineCount] = useState(1);
   const [toast, setToast] = useState<{ msg: string; id: number } | null>(null);
   const [rcActive, setRcActive] = useState(false);
+  const [rcViewOnly, setRcViewOnly] = useState(false);
   const [rcScreenStream, setRcScreenStream] = useState<MediaStream | null>(null);
   const [remoteCursorPos, setRemoteCursorPos] = useState<{ nx: number; ny: number } | null>(null);
+  const [artistCursorPos, setArtistCursorPos] = useState<{ nx: number; ny: number } | null>(null);
+  const artistCursorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendRcInputRef = useRef<((e: RemoteInputEvent) => void) | null>(null);
-  // Persistent subscribed channel ref — avoids the silent-drop bug
-  // where supabase.channel() called at send-time creates a fresh, unsubscribed handle
-  const workspaceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-  const { play, pause, stop, record } = useAudioEngine();
+  const webAudio   = useAudioEngine();
+  const nativeAudio = useNativeAudioEngine();
+  // Use native engine when available; fall back to Web Audio API
+  const { play, pause, stop, record, seek } = nativeAudio.nativeAvailable ? nativeAudio : webAudio;
   const { state, dispatch, masterStreamRef, audioCtxRef, currentTimeRef } = useDaw();
 
   // ── Live stream (ListenTo-style) ────────────────────────────
@@ -94,101 +100,70 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
     active: boolean,
     sendFn: ((e: RemoteInputEvent) => void) | null,
     screenStream: MediaStream | null,
+    viewOnly: boolean,
   ) => {
     setRcActive(active);
+    setRcViewOnly(viewOnly);
     sendRcInputRef.current = sendFn;
     setRcScreenStream(active ? screenStream : null);
-    if (!active) setRemoteCursorPos(null);
+    if (!active) {
+      setRemoteCursorPos(null);
+      setArtistCursorPos(null);
+      if (artistCursorTimerRef.current) clearTimeout(artistCursorTimerRef.current);
+    }
   }, []);
 
   // Remembers where playback started so spacebar stop can return there (Cubase behaviour)
   const prePlayPosRef = useRef<number>(0);
-  const actionsRef = useRef({ play, pause, stop, record });
+  const actionsRef = useRef({ play, pause, stop, record, seek });
   useEffect(() => {
-    actionsRef.current = { play, pause, stop, record };
-  }, [play, pause, stop, record]);
+    actionsRef.current = { play, pause, stop, record, seek };
+  }, [play, pause, stop, record, seek]);
 
-  // ── Remote Control RPC — with ack + retry ───────────────────
-  // sendRemoteCmd uses the already-subscribed workspaceChannelRef so the
-  // broadcast actually reaches the Supabase realtime server. A fresh
-  // supabase.channel() call (old code) returns an unsubscribed handle whose
-  // .send() silently no-ops.
-  const sendRemoteCmd = useCallback(
-    (action: 'play' | 'stop' | 'record', attempt = 0) => {
-      const ch = workspaceChannelRef.current;
-      if (!ch) return;
+  const handleSeek = useCallback((t: number) => {
+    prePlayPosRef.current = t; // Stop returns to seeked position, not original play start
+    actionsRef.current.seek(t);
+  }, []);
 
-      const ackEvent = `rpc-ack-${action}-${Date.now()}`;
-      let ackReceived = false;
-
-      // Listen for ack (Artist side echoes back)
-      const unsub = ch.on('broadcast', { event: 'rpc-ack' }, ({ payload }) => {
-        if (payload.action === action) {
-          ackReceived = true;
-        }
-      });
-
-      ch.send({ type: 'broadcast', event: 'rpc', payload: { action, ackEvent } })
-        .catch(err => console.error('RPC send failed:', err));
-
-      // Retry if no ack within 2 s (max 3 attempts)
-      setTimeout(() => {
-        // Unsubscribe the one-shot ack listener
-        (unsub as unknown as { unsubscribe?: () => void })?.unsubscribe?.();
-        if (!ackReceived && attempt < 2) {
-          console.warn(`RPC "${action}" no ack — retry ${attempt + 1}`);
-          sendRemoteCmd(action, attempt + 1);
-        } else if (!ackReceived) {
-          setToast({ msg: `Remote command "${action}" may not have reached the Artist.`, id: Date.now() });
-        }
-      }, 2000);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
+  const handleInputEvent = useCallback((event: RemoteInputEvent) => {
+    if (userRole === 'artist') {
+      // Show engineer's cursor position on artist screen, then replay the input
+      if (event.type === 'pointermove') {
+        setRemoteCursorPos({ nx: event.nx, ny: event.ny });
+      }
+      if (event.type !== 'artist-cursor') replayEvent(event);
+    } else {
+      // Engineer: receive artist cursor and display it on the RC overlay
+      if (event.type === 'artist-cursor') {
+        setArtistCursorPos({ nx: event.nx, ny: event.ny });
+        if (artistCursorTimerRef.current) clearTimeout(artistCursorTimerRef.current);
+        artistCursorTimerRef.current = setTimeout(() => setArtistCursorPos(null), 3000);
+      }
+    }
+  }, [userRole, replayEvent]);
 
   const handlePlay = () => {
-    prePlayPosRef.current = currentTimeRef.current;   // remember cursor position
+    prePlayPosRef.current = currentTimeRef.current;
     actionsRef.current.play();
-    if (userRole === 'engineer') sendRemoteCmd('play');
   };
   // Stop and return to where play started (spacebar, transport Stop button)
   const handleStop = () => {
     actionsRef.current.pause();
     currentTimeRef.current = prePlayPosRef.current;
     dispatch({ type: 'SET_CURRENT_TIME', payload: prePlayPosRef.current });
-    if (userRole === 'engineer') sendRemoteCmd('stop');
   };
   // Return to absolute zero — only triggered by Numpad 0 / Enter
   const handleReturnToZero = () => {
     actionsRef.current.stop();
     prePlayPosRef.current = 0;
-    if (userRole === 'engineer') sendRemoteCmd('stop');
   };
   const handleRecord = () => {
     actionsRef.current.record();
-    if (userRole === 'engineer') {
-      sendRemoteCmd('record');
-      setToast({ msg: '● Record command sent — ensure Artist has a track armed.', id: Date.now() });
-    }
   };
 
   useEffect(() => {
     const channel = supabase.channel(`daw-workspace-${roomCode}`, {
       config: { broadcast: { self: false } },
-    });
-    workspaceChannelRef.current = channel;
-
-    // Artist: execute incoming RPC and send ack so Engineer's retry logic settles
-    channel.on('broadcast', { event: 'rpc' }, ({ payload }) => {
-      if (userRole === 'artist') {
-        if (payload.action === 'play')   actionsRef.current.play();
-        if (payload.action === 'stop')   actionsRef.current.stop();
-        if (payload.action === 'record') actionsRef.current.record();
-        // Echo ack back
-        channel.send({ type: 'broadcast', event: 'rpc-ack', payload: { action: payload.action } })
-          .catch(() => {});
-      }
     });
 
     channel.on('presence', { event: 'sync' }, () => {
@@ -219,7 +194,6 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
     });
 
     return () => {
-      workspaceChannelRef.current = null;
       supabase.removeChannel(channel);
     };
   }, [roomCode, userRole, userId]);
@@ -233,6 +207,13 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Alt+N: toggle Lyrics View (works even when a textarea is focused)
+      if (e.altKey && (e.key === 'n' || e.key === 'N')) {
+        e.preventDefault();
+        setShowLyrics(v => !v);
+        return;
+      }
+
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
@@ -256,7 +237,6 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
           dispatch({ type: e.shiftKey ? 'REDO' : 'UNDO' });
           return;
         }
-        if (e.key === 'l') { e.preventDefault(); dispatch({ type: 'TOGGLE_LOOP' }); return; }
         if (e.key === 'm') { e.preventDefault(); dispatch({ type: 'TOGGLE_METRONOME' }); return; }
         if (e.key === ',') { e.preventDefault(); setShowPreferences(true); return; }
       }
@@ -269,7 +249,15 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
         return;
       }
 
+      if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); dispatch({ type: 'TOGGLE_LOOP' }); return; }
       if (e.key === 'r' || e.key === 'R') { handleRecord(); return; }
+
+      if (e.key === 'd' || e.key === 'D') {
+        if (state.selectedRegionId) {
+          dispatch({ type: 'TOGGLE_REGION_MUTE', payload: state.selectedRegionId });
+        }
+        return;
+      }
 
       // Numpad 0 / Enter → hard return to bar 1 (position 0)
       if (e.code === 'Numpad0' || e.code === 'Enter' || e.code === 'NumpadEnter') {
@@ -292,7 +280,7 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [state, dispatch, handlePlay, handleStop, handleReturnToZero, handleRecord]);
+  }, [state, dispatch, handlePlay, handleStop, handleReturnToZero, handleRecord, setShowLyrics]);
 
   return (
     <div className="daw-workspace" style={{ position: 'relative' }}>
@@ -305,9 +293,11 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
           localStorage.removeItem('sl_showApp');
           window.location.reload();
         }}
+        onToggleLyrics={() => setShowLyrics(v => !v)}
       />
       {showPreferences && <PreferencesDialog onClose={() => setShowPreferences(false)} />}
       {showAudioPrefs && <AudioMIDIPreferencesDialog onClose={() => setShowAudioPrefs(false)} />}
+      {showLyrics && <LyricsPanel onClose={() => setShowLyrics(false)} />}
       <TopToolbar roomCode={roomCode} userRole={userRole} onlineCount={onlineCount} />
 
       {toast && (
@@ -322,7 +312,7 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
         <div className="daw-arrange-section">
           <div className="daw-arrange-container">
             <TrackList />
-            <ArrangeWindow />
+            <ArrangeWindow onSeek={handleSeek} />
           </div>
           {showMixer && <MixerPanel />}
         </div>
@@ -347,16 +337,9 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
         userRole={userRole}
         userId={userId}
         roomCode={roomCode}
-        onInputEvent={userRole === 'artist'
-          ? (event) => {
-              // Intercept pointermove to update the cursor position before replaying
-              if (event.type === 'pointermove') {
-                setRemoteCursorPos({ nx: (event as any).nx, ny: (event as any).ny });
-              }
-              replayEvent(event);
-            }
-          : undefined
-        }
+        masterStreamRef={masterStreamRef}
+        audioCtxRef={audioCtxRef}
+        onInputEvent={handleInputEvent}
         onRcStateChange={handleRcStateChange}
       />
 
@@ -367,6 +350,8 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
           remoteScreenStream={rcScreenStream}
           onSendInput={(e) => sendRcInputRef.current?.(e)}
           onExit={() => setRcActive(false)}
+          viewOnly={rcViewOnly}
+          artistCursorPos={artistCursorPos}
         />
       )}
       {rcActive && userRole === 'artist' && (
@@ -374,6 +359,7 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode 
           userRole="artist"
           remoteCursorPos={remoteCursorPos}
           onRevoke={() => setRcActive(false)}
+          viewOnly={rcViewOnly}
         />
       )}
     </div>

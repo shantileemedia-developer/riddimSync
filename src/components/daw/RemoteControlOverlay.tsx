@@ -10,10 +10,13 @@ interface Props {
   onExit?: () => void;   // engineer
   /** normalized (0–1) cursor position broadcast by engineer — rendered for the artist */
   remoteCursorPos?: { nx: number; ny: number } | null;
+  /** normalized (0–1) cursor position broadcast by artist — rendered for the engineer */
+  artistCursorPos?: { nx: number; ny: number } | null;
+  viewOnly?: boolean;
 }
 
 const RemoteControlOverlay: React.FC<Props> = ({
-  userRole, remoteScreenStream, onSendInput, onRevoke, onExit, remoteCursorPos,
+  userRole, remoteScreenStream, onSendInput, onRevoke, onExit, remoteCursorPos, artistCursorPos, viewOnly,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoReady, setVideoReady] = useState(false);
@@ -156,18 +159,34 @@ const RemoteControlOverlay: React.FC<Props> = ({
     };
   }, [userRole, onSendInput, onExit]);
 
+  // ── Artist: ESC key immediately revokes RC ────────────────────────────────
+  useEffect(() => {
+    if (userRole !== 'artist') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onRevoke?.(); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [userRole, onRevoke]);
+
   if (userRole === 'engineer') {
     return (
       <div className="rc-engineer-overlay">
-        <div className="rc-engineer-bar">
+        <div className={`rc-engineer-bar${viewOnly ? ' rc-mode-view' : ''}`}>
           <div className="rc-bar-left">
             <div className="rc-dot" />
-            <span>REMOTE CONTROL ACTIVE — Artist&apos;s Session</span>
+            <span>
+              {viewOnly ? 'VIEW ONLY — Artist\'s Session' : 'FULL CONTROL — Artist\'s Session'}
+            </span>
           </div>
-          <button className="rc-exit-btn" onClick={onExit}>Exit Remote Control (Esc)</button>
+          <div className="rc-bar-right">
+            <span className={`rc-mode-badge${viewOnly ? ' rc-mode-badge-view' : ' rc-mode-badge-full'}`}>
+              {viewOnly ? 'View Only' : 'Full Control'}
+            </span>
+            <button className="rc-exit-btn" onClick={onExit}>Exit (Esc)</button>
+          </div>
         </div>
         <div className="rc-video-wrap">
-          {/* Loading overlay while stream connects */}
           {!videoReady && (
             <div className="rc-loading-overlay">
               <div className="rc-loading-spinner" />
@@ -182,11 +201,21 @@ const RemoteControlOverlay: React.FC<Props> = ({
             muted
             style={{ opacity: videoReady ? 1 : 0 }}
           />
-          {/* Engineer's cursor dot */}
+          {/* Engineer cursor — blue dot (local pointer over screen-share video) */}
           {cursorPos && (
             <div
-              className="rc-cursor-dot"
+              className="rc-cursor-dot rc-cursor-engineer"
               style={{ left: cursorPos.x, top: cursorPos.y }}
+            />
+          )}
+          {/* Artist cursor — teal dot showing where the artist's mouse is */}
+          {artistCursorPos && (
+            <div
+              className="rc-cursor-dot rc-cursor-artist"
+              style={{
+                left: `${artistCursorPos.nx * 100}%`,
+                top:  `${artistCursorPos.ny * 100}%`,
+              }}
             />
           )}
         </div>
@@ -196,21 +225,30 @@ const RemoteControlOverlay: React.FC<Props> = ({
 
   // ── Artist view ───────────────────────────────────────────────────────────
   return (
-    <div className="rc-artist-overlay">
-      <div className="rc-artist-bar">
+    <div className={`rc-artist-overlay${viewOnly ? ' rc-mode-view' : ''}`}>
+      <div className={`rc-artist-bar${viewOnly ? ' rc-mode-view' : ''}`}>
         <div className="rc-bar-left">
           <div className="rc-dot" />
-          <span>REMOTE CONTROL ACTIVE — Engineer is controlling your session</span>
+          <span>
+            {viewOnly
+              ? 'Engineer is watching your session'
+              : 'Engineer has full control of your session (Press ESC to stop)'}
+          </span>
         </div>
-        <button className="rc-revoke-btn" onClick={onRevoke}>Revoke Access</button>
+        <div className="rc-bar-right">
+          <span className={`rc-mode-badge${viewOnly ? ' rc-mode-badge-view' : ' rc-mode-badge-full'}`}>
+            {viewOnly ? 'View Only' : 'Full Control'}
+          </span>
+          <button className="rc-revoke-btn" onClick={onRevoke}>Stop Sharing</button>
+        </div>
       </div>
-      {/* Engineer's cursor shown on the artist's screen */}
+      {/* Engineer cursor — blue dot on artist's screen */}
       {remoteCursorPos && (
         <div
-          className="rc-remote-cursor"
+          className="rc-remote-cursor rc-cursor-engineer"
           style={{
-            left:  `${remoteCursorPos.nx * 100}%`,
-            top:   `${remoteCursorPos.ny * 100}%`,
+            left: `${remoteCursorPos.nx * 100}%`,
+            top:  `${remoteCursorPos.ny * 100}%`,
           }}
         />
       )}

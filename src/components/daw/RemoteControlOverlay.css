@@ -30,6 +30,44 @@
   gap: 8px;
 }
 
+.rc-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* View-only mode — amber instead of red */
+.rc-engineer-bar.rc-mode-view,
+.rc-artist-bar.rc-mode-view {
+  background: rgba(217, 119, 6, 0.92);
+}
+
+.rc-artist-overlay.rc-mode-view {
+  box-shadow: inset 0 0 0 3px rgba(217, 119, 6, 0.7);
+}
+
+/* Mode badge pill */
+.rc-mode-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.22);
+  color: #fff;
+  white-space: nowrap;
+}
+
+.rc-mode-badge-view {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.rc-mode-badge-full {
+  border-color: rgba(255, 200, 200, 0.5);
+}
+
 .rc-dot {
   width: 8px;
   height: 8px;
@@ -82,13 +120,43 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: rgba(255, 77, 77, 0.9);
-  border: 2px solid #fff;
-  box-shadow: 0 0 8px rgba(255, 77, 77, 0.6);
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid rgba(255,255,255,0.6);
+  box-shadow: 0 0 8px rgba(255,255,255,0.4);
   pointer-events: none;
   transform: translate(-50%, -50%);
   z-index: 10;
   transition: left 0.03s linear, top 0.03s linear;
+}
+
+/* Blue = engineer cursor */
+.rc-cursor-engineer {
+  background: rgba(0, 122, 255, 0.92);
+  border-color: #fff;
+  box-shadow: 0 0 8px rgba(0, 122, 255, 0.7);
+}
+
+/* Teal = artist cursor (shown on engineer's RC overlay) */
+.rc-cursor-artist {
+  background: rgba(0, 255, 204, 0.9);
+  border-color: rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 8px rgba(0, 255, 204, 0.6);
+}
+
+.rc-cursor-artist::after {
+  content: 'ARTIST';
+  position: absolute;
+  top: 14px;
+  left: 10px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #00ffcc;
+  background: rgba(0, 0, 0, 0.75);
+  padding: 1px 4px;
+  border-radius: 2px;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* Loading overlay while screen-share stream connects */
@@ -165,27 +233,27 @@
   background: rgba(0, 0, 0, 0.45);
 }
 
-/* Remote cursor dot — engineer's position shown on artist's screen */
+/* Remote cursor dot — engineer's position shown on artist's screen (blue) */
 .rc-remote-cursor {
   position: fixed;
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: rgba(255, 77, 77, 0.85);
+  background: rgba(0, 122, 255, 0.9);
   border: 2px solid #fff;
-  box-shadow: 0 0 10px rgba(255, 77, 77, 0.7), 0 0 20px rgba(255, 77, 77, 0.3);
+  box-shadow: 0 0 10px rgba(0, 122, 255, 0.7), 0 0 20px rgba(0, 122, 255, 0.3);
   pointer-events: none;
   transform: translate(-50%, -50%);
   z-index: 9999;
   transition: left 0.05s linear, top 0.05s linear;
 }
-/* Pulse ring around the artist's remote cursor for extra visibility */
+/* Pulse ring */
 .rc-remote-cursor::after {
   content: '';
   position: absolute;
   inset: -6px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 77, 77, 0.4);
+  border: 2px solid rgba(0, 122, 255, 0.4);
   animation: rc-cursor-pulse 1.5s ease-out infinite;
 }
 @keyframes rc-cursor-pulse {

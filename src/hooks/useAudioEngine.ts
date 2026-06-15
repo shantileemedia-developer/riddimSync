@@ -1,14 +1,18 @@
 import { useRef, useCallback, useEffect } from 'react';
 import { useDaw } from '../context/DawContext';
 import type { Region, PoolItem } from '../context/DawContext';
-import { generatePeaksStereo, uploadAudioToSupabase, saveToAudioFolder } from '../utils/audioUtils';
+import { generatePeaksStereo, uploadAudioToSupabase, saveToAudioFolder, createWavHeader, floatsToPcm24, extractPeaksFromFloat32 } from '../utils/audioUtils';
 import { loadAudioPrefs } from '../components/daw/AudioMIDIPreferencesDialog';
 
 const CLICK_LOOKAHEAD_S = 0.15;  // schedule this many seconds ahead
 const CLICK_INTERVAL_MS = 25;    // scheduler polling interval (ms)
 
+// Module-level map so blobs survive re-renders and can be retried after a failed upload
+const pendingRetryBlobs = new Map<string, Blob>();
+
+
 export const useAudioEngine = () => {
-  const { state, dispatch, currentTimeRef, audioCtxRef, recordingStartTimeRef, livePeaksRef, trackAnalysersRef, trackGainsRef, trackPannersRef, masterGainRef, masterAnalyserRef, userRole, masterStreamRef, audioDirHandle } = useDaw();
+  const { state, dispatch, currentTimeRef, audioCtxRef, recordingStartTimeRef, livePeaksRef, trackAnalysersRef, trackGainsRef, trackPannersRef, masterGainRef, masterAnalyserRef, userRole, masterStreamRef, audioDirHandle, retryUploadRef } = useDaw();
 
   const animFrameRef = useRef<number | null>(null);
   const playStartAudioTimeRef = useRef<number>(0);
@@ -26,12 +30,42 @@ export const useAudioEngine = () => {
   const playIdRef = useRef(0);
   // Cache decoded AudioBuffers so 2nd+ plays are instant
   const bufferCacheRef = useRef<Map<string, AudioBuffer>>(new Map());
+
+  // ── Continuous recording refs ────────────────────────────────────────────────
+  const recordWorkletRef     = useRef<AudioWorkletNode | null>(null);
+  const recordStreamRef      = useRef<any>(null);           // FileSystemWritableFileStream
+  const recordFileHandleRef  = useRef<any>(null);           // FileSystemFileHandle
+  const recordPcmBytesRef    = useRef(0);
+  const recordNumChRef       = useRef(2);
+  const recordSrRef          = useRef(48000);
+  const workletLoadedRef     = useRef(false);
+  const micStreamRef         = useRef<MediaStream | null>(null);
+  const monitorGainRef       = useRef<GainNode | null>(null);
+  const takeNameRef          = useRef('Take');
+  // Punch mode refs
+  const punchArmedRef        = useRef(false);    // mic is set up, waiting for punchIn
+  const punchWritingRef      = useRef(false);    // currently writing PCM (between punch in/out)
+  const punchInRef           = useRef<number | null>(state.transport.punchIn);
+  const punchOutRef          = useRef<number | null>(state.transport.punchOut);
+  const isRecordingRef       = useRef(false);    // mirrors state.transport.isRecording for the tick
   const clickSourcesRef  = useRef<any[]>([]);
   const nextClickTimeRef = useRef(0);
   const clickBeatRef     = useRef(0);
   const clickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tempoRef         = useRef(state.transport.tempo);
   const timeSigRef       = useRef<[number, number]>(state.transport.timeSignature as [number, number]);
+  const projectEndTimeRef = useRef<number>(Infinity); // updated in play() to the last region's end time
+
+  // Live transport refs — kept in sync so the anim loop tick always reads current values
+  const isLoopingRef  = useRef(state.transport.isLooping);
+  const loopStartRef  = useRef(state.transport.loopStart);
+  const loopEndRef    = useRef(state.transport.loopEnd);
+  // Function refs — updated after each useCallback definition so the tick can call them
+  const playFnRef                = useRef<(() => Promise<void>) | null>(null);
+  const stopSrcRef               = useRef<(() => void) | null>(null);
+  const stopMetroRef             = useRef<(() => void) | null>(null);
+  const openPunchStreamRef       = useRef<(() => void) | null>(null);
+  const stopRecordingSessionRef  = useRef<(() => void) | null>(null);
 
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
@@ -102,6 +136,7 @@ export const useAudioEngine = () => {
     clickSourcesRef.current.forEach(n => { try { n.stop(now); } catch {} });
     clickSourcesRef.current = [];
   }, [audioCtxRef]);
+  stopMetroRef.current = stopMetronome;
 
   const startMetronome = useCallback((ctx: AudioContext) => {
     const schedule = () => {
@@ -125,27 +160,57 @@ export const useAudioEngine = () => {
     }
   }, []);
 
+  // Keep transport refs current so the anim loop tick never reads stale closure values
+  useEffect(() => { isLoopingRef.current  = state.transport.isLooping;  }, [state.transport.isLooping]);
+  useEffect(() => { loopStartRef.current  = state.transport.loopStart;  }, [state.transport.loopStart]);
+  useEffect(() => { loopEndRef.current    = state.transport.loopEnd;    }, [state.transport.loopEnd]);
+  useEffect(() => { punchInRef.current    = state.transport.punchIn;    }, [state.transport.punchIn]);
+  useEffect(() => { punchOutRef.current   = state.transport.punchOut;   }, [state.transport.punchOut]);
+  useEffect(() => { isRecordingRef.current = state.transport.isRecording; }, [state.transport.isRecording]);
+
   const startAnimLoop = useCallback((ctx: AudioContext) => {
     stopAnimLoop();
     const tick = () => {
-      // Clamp to 0 so the transport cursor doesn't run ahead during the lookahead window
       const elapsed = Math.max(0, ctx.currentTime - playStartAudioTimeRef.current);
       let dawTime = playStartDawTimeRef.current + elapsed;
 
-      // Handle looping
-      if (state.transport.isLooping && state.transport.loopEnd > state.transport.loopStart) {
-        if (dawTime >= state.transport.loopEnd) {
-          // Simple visual loop - audio nodes would actually need rescheduling for seamless loop
-          // But for this prototype, we'll just snap the playhead back
-          const loopLen = state.transport.loopEnd - state.transport.loopStart;
-          dawTime = state.transport.loopStart + ((dawTime - state.transport.loopStart) % loopLen);
-          playStartAudioTimeRef.current = ctx.currentTime;
-          playStartDawTimeRef.current = dawTime;
-          // Note: Seamless audio looping requires look-ahead scheduling, omitted for brevity
-        }
+      // Proper audio loop restart — stops old sources and replays from loopStart
+      if (isLoopingRef.current && loopEndRef.current > loopStartRef.current && dawTime >= loopEndRef.current) {
+        ++playIdRef.current;
+        stopSrcRef.current?.();
+        stopMetroRef.current?.();
+        currentTimeRef.current = loopStartRef.current;
+        dispatch({ type: 'SET_CURRENT_TIME', payload: loopStartRef.current });
+        playFnRef.current?.(); // restarts audio + new anim loop from loopStart
+        return;
       }
 
       currentTimeRef.current = dawTime;
+
+      // Punch-in: start writing when playhead crosses punchIn
+      if (punchArmedRef.current && !punchWritingRef.current && punchInRef.current !== null && dawTime >= punchInRef.current) {
+        punchWritingRef.current = true;
+        // Open the FSAA stream now (worklet is already capturing; we just start writing)
+        openPunchStreamRef.current?.();
+      }
+
+      // Punch-out: stop writing when playhead crosses punchOut
+      if (punchWritingRef.current && punchOutRef.current !== null && dawTime >= punchOutRef.current) {
+        punchArmedRef.current  = false;
+        punchWritingRef.current = false;
+        stopRecordingSessionRef.current?.();
+        return;
+      }
+
+      // Auto-stop when playhead reaches project end (not looping)
+      if (!isLoopingRef.current && dawTime >= projectEndTimeRef.current) {
+        stopAnimLoop();
+        dispatch({ type: 'SET_PLAYING', payload: false });
+        dispatch({ type: 'SET_CURRENT_TIME', payload: projectEndTimeRef.current });
+        currentTimeRef.current = projectEndTimeRef.current;
+        return;
+      }
+
       // Only push to React state ~10fps to avoid flooding renders
       if (ctx.currentTime - lastDispatchTimeRef.current > 0.1) {
         dispatch({ type: 'SET_CURRENT_TIME', payload: dawTime });
@@ -219,6 +284,11 @@ export const useAudioEngine = () => {
       region.startTime + region.duration > offset
     );
 
+    // Set project end so the anim loop can auto-stop there
+    projectEndTimeRef.current = playableRegions.length > 0
+      ? Math.max(...playableRegions.map(r => r.startTime + r.duration))
+      : Infinity;
+
     // Decode ALL audio first — before locking in the schedule time.
     // This ensures the playhead and audio always start in sync, even for large files.
     // Decoded buffers are cached by URL so 2nd+ plays are instant.
@@ -240,29 +310,59 @@ export const useAudioEngine = () => {
     // If stop() or pause() was called during decode, bail out — don't start audio
     if (playId !== playIdRef.current) return;
 
-    // Detect crossfades: when two clips on the same track overlap, the overlapping
-    // portion fades out clip A and fades in clip B automatically.
+    // The browser may have re-suspended the AudioContext during the async decode phase.
+    // Re-check and resume before scheduling so sources actually play.
+    if (ctx.state === 'suspended') await ctx.resume();
+    if (playId !== playIdRef.current) return; // bail if stopped during resume
+
+    // Apply crossfades from explicit state.crossfades entries (non-destructive, user-controlled via X key).
+    // Duration is computed live from the current overlap — moves automatically as clips are repositioned.
     const effectiveFades = new Map<string, { fadeIn: number; fadeOut: number }>();
-    const byTrack = new Map<string, typeof decoded>();
+    for (const cf of state.crossfades) {
+      const itemA = decoded.find(d => d?.region.id === cf.regionA);
+      const itemB = decoded.find(d => d?.region.id === cf.regionB);
+      if (!itemA || !itemB) continue;
+      const [first, second] = itemA.region.startTime <= itemB.region.startTime
+        ? [itemA.region, itemB.region]
+        : [itemB.region, itemA.region];
+      const overlap = (first.startTime + first.duration) - second.startTime;
+      if (overlap > 0.01) {
+        const af = effectiveFades.get(first.id) ?? { fadeIn: first.fadeIn ?? 0, fadeOut: first.fadeOut ?? 0 };
+        af.fadeOut = Math.max(af.fadeOut, overlap);
+        effectiveFades.set(first.id, af);
+        const bf = effectiveFades.get(second.id) ?? { fadeIn: second.fadeIn ?? 0, fadeOut: second.fadeOut ?? 0 };
+        bf.fadeIn = Math.max(bf.fadeIn, overlap);
+        effectiveFades.set(second.id, bf);
+      }
+    }
+
+    // Auto-crossfade: detect overlapping clips on the same track without user action
+    const byTrack = new Map<string, NonNullable<(typeof decoded)[0]>[]>();
     for (const item of decoded) {
       if (!item) continue;
-      const arr = byTrack.get(item.region.trackId) ?? [];
-      arr.push(item);
-      byTrack.set(item.region.trackId, arr);
+      const list = byTrack.get(item.region.trackId) ?? [];
+      list.push(item);
+      byTrack.set(item.region.trackId, list);
     }
-    for (const clips of byTrack.values()) {
-      clips.sort((a, b) => a!.region.startTime - b!.region.startTime);
-      for (let i = 0; i + 1 < clips.length; i++) {
-        const a = clips[i]!;
-        const b = clips[i + 1]!;
-        const overlap = (a.region.startTime + a.region.duration) - b.region.startTime;
+    for (const items of byTrack.values()) {
+      items.sort((a, b) => a.region.startTime - b.region.startTime);
+      for (let i = 0; i < items.length - 1; i++) {
+        const cur = items[i]!;
+        const nxt = items[i + 1]!;
+        // Skip pairs already covered by explicit user-defined crossfade
+        const alreadyExplicit = state.crossfades.some(
+          cf => (cf.regionA === cur.region.id && cf.regionB === nxt.region.id) ||
+                (cf.regionA === nxt.region.id && cf.regionB === cur.region.id)
+        );
+        if (alreadyExplicit) continue;
+        const overlap = (cur.region.startTime + cur.region.duration) - nxt.region.startTime;
         if (overlap > 0.01) {
-          const af = effectiveFades.get(a.region.id) ?? { fadeIn: a.region.fadeIn ?? 0, fadeOut: a.region.fadeOut ?? 0 };
+          const af = effectiveFades.get(cur.region.id) ?? { fadeIn: cur.region.fadeIn ?? 0, fadeOut: cur.region.fadeOut ?? 0 };
           af.fadeOut = Math.max(af.fadeOut, overlap);
-          effectiveFades.set(a.region.id, af);
-          const bf = effectiveFades.get(b.region.id) ?? { fadeIn: b.region.fadeIn ?? 0, fadeOut: b.region.fadeOut ?? 0 };
+          effectiveFades.set(cur.region.id, af);
+          const bf = effectiveFades.get(nxt.region.id) ?? { fadeIn: nxt.region.fadeIn ?? 0, fadeOut: nxt.region.fadeOut ?? 0 };
           bf.fadeIn = Math.max(bf.fadeIn, overlap);
-          effectiveFades.set(b.region.id, bf);
+          effectiveFades.set(nxt.region.id, bf);
         }
       }
     }
@@ -289,9 +389,20 @@ export const useAudioEngine = () => {
 
       const bus = trackBusses[region.trackId];
       if (bus) {
+        const clipGainVal = (region.gain ?? 1);
         const ef = effectiveFades.get(region.id);
         const fi = ef ? ef.fadeIn  : (region.fadeIn  ?? 0);
         const fo = ef ? ef.fadeOut : (region.fadeOut ?? 0);
+
+        // Chain: source → [fadeGain] → [clipGain] → bus.gain
+        let dest: AudioNode = bus.gain;
+        if (clipGainVal !== 1) {
+          const cg = ctx.createGain();
+          cg.gain.value = Math.max(0, clipGainVal);
+          cg.connect(bus.gain);
+          dest = cg;
+        }
+
         if (fi > 0 || fo > 0) {
           const fg = ctx.createGain();
           if (fi > 0) {
@@ -311,9 +422,9 @@ export const useAudioEngine = () => {
             fg.gain.linearRampToValueAtTime(0, whenInAudio + playDuration);
           }
           source.connect(fg);
-          fg.connect(bus.gain);
+          fg.connect(dest);
         } else {
-          source.connect(bus.gain);
+          source.connect(dest);
         }
       }
 
@@ -333,6 +444,7 @@ export const useAudioEngine = () => {
     console.error('[AudioEngine] play() error:', err);
   }
   }, [state, dispatch, currentTimeRef, getAudioCtx, startAnimLoop, startMetronome, masterStreamRef]);
+  playFnRef.current = play;
 
   const stopSources = useCallback(() => {
     activeSourcesRef.current.forEach(s => { try { s.stop(); } catch { /* already stopped */ } });
@@ -343,6 +455,7 @@ export const useAudioEngine = () => {
     masterGainRef.current      = null;
     masterAnalyserRef.current  = null;
   }, [trackAnalysersRef, trackGainsRef, trackPannersRef, masterGainRef, masterAnalyserRef]);
+  stopSrcRef.current = stopSources;
 
   // Live fader/mute/pan — push track changes to active audio nodes immediately
   useEffect(() => {
@@ -363,11 +476,25 @@ export const useAudioEngine = () => {
   }, [state.tracks, trackGainsRef, trackPannersRef, audioCtxRef]);
 
   const stopRecordingSession = useCallback(() => {
+    dispatch({ type: 'SET_RECORDING', payload: false });
+    isRecordingRef.current = false;
+    punchArmedRef.current  = false;
+    punchWritingRef.current = false;
+
+    // ── AudioWorklet + FSAA path ──────────────────────────────────────────────
+    if (recordWorkletRef.current) {
+      recordWorkletRef.current.port.postMessage('stop');
+      recordWorkletRef.current = null;
+      // WAV finalisation happens in the worklet onmessage handler (final: true)
+      return;
+    }
+
+    // ── Legacy MediaRecorder fallback ─────────────────────────────────────────
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
-    dispatch({ type: 'SET_RECORDING', payload: false });
   }, [dispatch]);
+  stopRecordingSessionRef.current = stopRecordingSession;
 
   // Pause: halt playback but keep the playhead position
   const pause = useCallback(() => {
@@ -394,7 +521,6 @@ export const useAudioEngine = () => {
 
   const record = useCallback(async () => {
     if (userRole === 'engineer') {
-      // Engineer's local playhead just starts moving, but audio capture happens on Artist side.
       const ctx = getAudioCtx();
       playStartAudioTimeRef.current = ctx.currentTime;
       playStartDawTimeRef.current = currentTimeRef.current;
@@ -413,10 +539,12 @@ export const useAudioEngine = () => {
     let stream: MediaStream;
     try {
       const prefs = loadAudioPrefs();
-      const audioConstraint: MediaTrackConstraints | boolean =
-        prefs.inputDeviceId !== 'default'
-          ? { deviceId: { exact: prefs.inputDeviceId } }
-          : true;
+      // Per-track input takes priority over the global Audio Preferences device
+      const deviceId = armedTrack.inputDeviceId ?? prefs.inputDeviceId;
+      const audioConstraint: MediaTrackConstraints =
+        deviceId !== 'default'
+          ? { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true, autoGainControl: false }
+          : { echoCancellation: true, noiseSuppression: true, autoGainControl: false };
       stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint, video: false });
     } catch (err: any) {
       const msg = err?.name === 'NotAllowedError'
@@ -432,11 +560,11 @@ export const useAudioEngine = () => {
 
     armedTrackIdRef.current = armedTrack.id;
     recordingStartDawTimeRef.current = currentTimeRef.current;
-    recordingStartTimeRef.current = currentTimeRef.current;
-    recordingChunksRef.current = [];
+    recordingStartTimeRef.current    = currentTimeRef.current;
     livePeaksRef.current = [];
+    micStreamRef.current = stream;
 
-    // Tap the mic through the track's monitoring chain (volume + pan)
+    // ── Mic routing chain: source → track gain/pan → analyser → destination ──
     const micSource = ctx.createMediaStreamSource(stream);
     const monGain   = ctx.createGain();
     const monPanner = ctx.createStereoPanner();
@@ -448,132 +576,270 @@ export const useAudioEngine = () => {
     monGain.connect(monPanner);
     monPanner.connect(analyser);
     if (masterStreamRef.current) monPanner.connect(masterStreamRef.current);
-    // Store in refs so live fader/pan moves affect monitoring during recording
     trackGainsRef.current[armedTrack.id]   = monGain;
     trackPannersRef.current[armedTrack.id] = monPanner;
     micSourceRef.current = micSource;
     analyserRef.current  = analyser;
 
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
+    // ── Input monitoring: route mic to speakers when isMonitoring is on ───────
+    const monitorOut = ctx.createGain();
+    monitorOut.gain.value = armedTrack.isMonitoring ? 1 : 0;
+    monPanner.connect(monitorOut);
+    monitorOut.connect(ctx.destination);
+    monitorGainRef.current = monitorOut;
 
-    const mediaRecorder = new MediaRecorder(stream, { mimeType });
+    // ── Determine take name before async work ──────────────────────────────────
+    const trackName = armedTrack.name;
+    const takeNum   = state.poolItems.filter(p => p.name.startsWith(trackName)).length + 1;
+    const takeName  = `${trackName}_Take_${takeNum}`;
+    takeNameRef.current = takeName;
 
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        recordingChunksRef.current.push(e.data);
-        // Sample analyser for live waveform (~10 peaks/sec at 100ms chunks)
-        if (analyserRef.current) {
-          const data = new Uint8Array(analyserRef.current.fftSize);
-          analyserRef.current.getByteTimeDomainData(data);
-          let sum = 0;
-          for (let i = 0; i < data.length; i++) {
-            const v = (data[i] / 128) - 1;
-            sum += v * v;
-          }
-          livePeaksRef.current.push(Math.sqrt(sum / data.length));
-        }
-      }
-    };
-
-    mediaRecorder.onstop = async () => {
+    // ── Helper: commit finalised PCM bytes as a WAV Region ────────────────────
+    const commitRecording = async (wavBytes: number, getBlob: () => Promise<Blob>) => {
       if (micSourceRef.current) { micSourceRef.current.disconnect(); micSourceRef.current = null; }
       analyserRef.current = null;
+      monitorGainRef.current = null;
       delete trackGainsRef.current[armedTrack.id];
       delete trackPannersRef.current[armedTrack.id];
       stream.getTracks().forEach(t => t.stop());
+      micStreamRef.current = null;
 
-      const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+      let blob: Blob;
+      try { blob = await getBlob(); } catch { return; }
+      if (blob.size < 100) return; // guard against empty takes
 
-      let peaks: number[] = [];
+      const poolItemId = `pool_${Date.now()}`;
+      const audioUrl   = URL.createObjectURL(blob);
+
+      let peaks: number[]   = [];
       let peaksR: number[] | null = null;
-      let duration = 0;
+      let duration           = 0;
       let decodedBuffer: AudioBuffer | null = null;
       try {
         const ab = await blob.arrayBuffer();
-        decodedBuffer = await ctx.decodeAudioData(ab);
+        decodedBuffer = await ctx.decodeAudioData(ab.slice(0));
         const stereo = await generatePeaksStereo(decodedBuffer);
-        peaks = stereo.left;
-        // Only carry stereo peaks if the armed track is a stereo track
-        const armedTrack = state.tracks.find(t => t.id === armedTrackIdRef.current);
-        peaksR = armedTrack?.type === 'stereo' ? stereo.right : null;
+        peaks  = stereo.left;
+        peaksR = armedTrack.type === 'stereo' ? stereo.right : null;
         duration = decodedBuffer.duration;
       } catch {
-        duration = currentTimeRef.current - recordingStartDawTimeRef.current;
+        duration = Math.max(0.1, wavBytes / (recordNumChRef.current * recordSrRef.current * 3));
       }
 
-      const currentTrackId = armedTrackIdRef.current!;
-      const trackName = state.tracks.find(t => t.id === currentTrackId)?.name ?? 'Track';
-      const takeNum = state.poolItems.filter(p => p.name.startsWith(trackName)).length + 1;
-      const name = `${trackName}_Take_${takeNum}`;
-
-      // PRIMARY: blob URL — works instantly, no network dependency
-      const audioUrl = URL.createObjectURL(blob);
-
-      // Save as 24-bit WAV into the project's Audio/ folder
       if (audioDirHandle && decodedBuffer) {
-        saveToAudioFolder(audioDirHandle, name, decodedBuffer).catch(err =>
-          console.error(`Audio/ WAV save failed for ${name}:`, err)
-        );
+        saveToAudioFolder(audioDirHandle, takeName, decodedBuffer).catch(console.error);
       }
-
-      const poolItemId = `pool_${Date.now()}`;
-
-      // BACKGROUND: Supabase cloud backup — once done, update URLs so project.json gets a shareable link
-      uploadAudioToSupabase(blob, `${name}.wav`).then(supabaseUrl => {
-        if (supabaseUrl && supabaseUrl !== audioUrl) {
-          dispatch({ type: 'UPDATE_AUDIO_URLS', payload: { poolItemId, audioUrl: supabaseUrl } });
-        }
-      }).catch(() => {});
 
       const poolItem: PoolItem = {
         id: poolItemId,
-        name,
+        name: takeName,
         audioUrl,
-        localFileName: `${name}.wav`,
+        localFileName: `${takeName}.wav`,
         duration,
         createdAt: new Date(),
         waveformPeaks: peaks,
         waveformPeaksR: peaksR,
+        uploadStatus: 'uploading',
       };
-
-      const armedTrackObj = state.tracks.find(t => t.id === currentTrackId);
+      const armedTrackObj = state.tracks.find(t => t.id === armedTrack.id);
       const region: Region = {
         id: `region_${Date.now()}`,
         poolItemId,
-        trackId: currentTrackId,
+        trackId: armedTrack.id,
         versionId: armedTrackObj?.activeVersionId ?? 'default',
         startTime: recordingStartDawTimeRef.current,
         duration,
-        name,
+        name: takeName,
         audioUrl,
         waveformPeaks: peaks,
         waveformPeaksR: peaksR,
         sourceDuration: duration,
-        sourcePeaks:  peaks,
+        sourcePeaks: peaks,
         sourcePeaksR: peaksR,
       };
-
       dispatch({ type: 'ADD_POOL_ITEM', payload: poolItem });
       dispatch({ type: 'ADD_REGION', payload: region });
+
+      // Keep blob in memory for retry if upload fails
+      pendingRetryBlobs.set(poolItemId, blob);
+
+      uploadAudioToSupabase(blob, `${takeName}.wav`)
+        .then(({ publicUrl, storagePath }) => {
+          pendingRetryBlobs.delete(poolItemId);
+          dispatch({ type: 'SET_POOL_ITEM_UPLOAD_STATUS', payload: { id: poolItemId, status: 'done', storagePath } });
+          if (publicUrl !== audioUrl) {
+            dispatch({ type: 'UPDATE_AUDIO_URLS', payload: { poolItemId, audioUrl: publicUrl } });
+          }
+        })
+        .catch(() => {
+          dispatch({ type: 'SET_POOL_ITEM_UPLOAD_STATUS', payload: { id: poolItemId, status: 'failed' } });
+        });
     };
 
-    const startRecordingSession = () => {
-      // Capture a generation ID so stop() can abort in-flight overdub decodes
-      const recId = ++playIdRef.current;
+    // ── Try AudioWorklet + FSAA (crash-safe streaming) ────────────────────────
+    const hasWorklet = typeof AudioWorkletNode !== 'undefined';
+    const hasFsaa    = typeof (window as any).showSaveFilePicker === 'function';
+
+    if (hasWorklet && hasFsaa) {
+      try {
+        if (!workletLoadedRef.current) {
+          await ctx.audioWorklet.addModule(new URL('../audio/recorder-processor.js', import.meta.url));
+          workletLoadedRef.current = true;
+        }
+
+        const numChannels = stream.getAudioTracks()[0]?.getSettings().channelCount ?? 2;
+        recordNumChRef.current = numChannels;
+        recordSrRef.current    = ctx.sampleRate;
+        recordPcmBytesRef.current = 0;
+
+        const workletNode = new AudioWorkletNode(ctx, 'recorder-processor', {
+          numberOfInputs: 1,
+          numberOfOutputs: 0,
+          channelCount: numChannels,
+          channelCountMode: 'explicit',
+        });
+        micSource.connect(workletNode);
+        recordWorkletRef.current = workletNode;
+
+        // Determine if this is a punch recording
+        const isPunch = punchInRef.current !== null;
+
+        // FSAA: pick a save location
+        let fileHandle: any;
+        try {
+          fileHandle = await (window as any).showSaveFilePicker({
+            suggestedName: `${takeName}.wav`,
+            types: [{ description: 'WAV Audio', accept: { 'audio/wav': ['.wav'] } }],
+          });
+        } catch {
+          // User cancelled the picker — fall through to MediaRecorder
+          workletNode.disconnect();
+          recordWorkletRef.current = null;
+          throw new Error('picker-cancelled');
+        }
+        recordFileHandleRef.current = fileHandle;
+
+        // Open write stream and write placeholder WAV header
+        const writableStream = await fileHandle.createWritable();
+        recordStreamRef.current = writableStream;
+        const header = createWavHeader(ctx.sampleRate, numChannels);
+        await writableStream.write(header);
+
+        // openPunchStream: called by the tick when dawTime >= punchIn
+        const openPunchStream = () => { /* stream is already open; just gate writing */ };
+        openPunchStreamRef.current = isPunch ? openPunchStream : null;
+
+        if (isPunch) {
+          punchArmedRef.current   = true;
+          punchWritingRef.current = false;
+        }
+
+        // Worklet message handler — receives PCM blocks from the audio thread
+        workletNode.port.onmessage = async (e: MessageEvent) => {
+          const { channels, final } = e.data as { channels: Float32Array[]; final?: boolean };
+          // Only write during punch window (or always if not a punch recording)
+          const shouldWrite = !isPunch || punchWritingRef.current;
+          if (shouldWrite) {
+            const pcm = floatsToPcm24(channels);
+            recordPcmBytesRef.current += pcm.byteLength;
+            // accumulate live peaks
+            const { left: peakBlock } = extractPeaksFromFloat32(channels[0], channels[1] ?? null, 8);
+            livePeaksRef.current.push(...peakBlock);
+            try {
+              await recordStreamRef.current?.write(pcm);
+            } catch { /* disk full or stream closed */ }
+          }
+
+          if (final) {
+            // Update RIFF and data chunk sizes now that we know total bytes
+            const dataBytes = recordPcmBytesRef.current;
+            try {
+              const ws = recordStreamRef.current;
+              const riffSizeBuf = new ArrayBuffer(4);
+              new DataView(riffSizeBuf).setUint32(0, 36 + dataBytes, true);
+              await ws.seek(4);
+              await ws.write(riffSizeBuf);
+
+              const dataSizeBuf = new ArrayBuffer(4);
+              new DataView(dataSizeBuf).setUint32(0, dataBytes, true);
+              await ws.seek(40);
+              await ws.write(dataSizeBuf);
+
+              await ws.close();
+            } catch { /* best effort */ }
+            recordStreamRef.current   = null;
+            recordWorkletRef.current  = null;
+
+            // Materialise blob from the saved file for pool/peaks
+            const file     = await recordFileHandleRef.current?.getFile();
+            const finalBlob = file ? new Blob([await file.arrayBuffer()], { type: 'audio/wav' }) : null;
+            recordFileHandleRef.current = null;
+
+            await commitRecording(dataBytes, async () => finalBlob ?? new Blob([], { type: 'audio/wav' }));
+          }
+        };
+
+        // Fall through to startRecordingSession (overdub scheduling + anim loop)
+      } catch (err: any) {
+        if (err?.message !== 'picker-cancelled') {
+          console.warn('AudioWorklet/FSAA unavailable, falling back to MediaRecorder:', err);
+        }
+        // Fall through to MediaRecorder path below
+        recordWorkletRef.current = null;
+        recordStreamRef.current  = null;
+      }
+    }
+
+    // ── MediaRecorder fallback (or continuing after worklet setup) ────────────
+    // If worklet setup succeeded, mediaRecorder is still used for overdub scheduling
+    // but we skip attaching it to the mic stream.
+    const useWorklet = recordWorkletRef.current !== null;
+
+    if (!useWorklet) {
+      // Pure MediaRecorder path
+      recordingChunksRef.current = [];
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          recordingChunksRef.current.push(e.data);
+          if (analyserRef.current) {
+            const data = new Uint8Array(analyserRef.current.fftSize);
+            analyserRef.current.getByteTimeDomainData(data);
+            let sum = 0;
+            for (let i = 0; i < data.length; i++) {
+              const v = (data[i] / 128) - 1; sum += v * v;
+            }
+            livePeaksRef.current.push(Math.sqrt(sum / data.length));
+          }
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+        await commitRecording(blob.size, async () => blob);
+      };
+
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(100);
+    }
+
+    const startRecordingSession = () => {
+      const recId = ++playIdRef.current;
+      if (!useWorklet && mediaRecorderRef.current) {
+        mediaRecorderRef.current.start(100);
+      }
 
       playStartAudioTimeRef.current = ctx.currentTime;
-      playStartDawTimeRef.current = currentTimeRef.current;
+      playStartDawTimeRef.current   = currentTimeRef.current;
+      isRecordingRef.current        = true;
       dispatch({ type: 'SET_RECORDING', payload: true });
       dispatch({ type: 'SET_PLAYING', payload: true });
       startAnimLoop(ctx);
 
-      // ── Overdub: schedule existing region sources so they play back
-      // alongside the new recording (same logic as play(), but after
-      // the record start position is locked in).
+      // ── Overdub: schedule existing clips alongside new recording ──────────
       const hasSolo = state.tracks.some(t => t.isSolo);
       const playableTracks = new Set(
         state.tracks
@@ -581,7 +847,6 @@ export const useAudioEngine = () => {
           .map(t => t.id)
       );
 
-      // Reuse or create master bus for overdub session
       if (!masterGainRef.current) {
         const mg = ctx.createGain();
         mg.gain.value = 1;
@@ -589,7 +854,7 @@ export const useAudioEngine = () => {
         ma.fftSize = 2048; ma.smoothingTimeConstant = 0.75;
         mg.connect(ma); ma.connect(ctx.destination);
         if (masterStreamRef.current) ma.connect(masterStreamRef.current);
-        masterGainRef.current = mg;
+        masterGainRef.current   = mg;
         masterAnalyserRef.current = ma;
       }
       const trackBusses: Record<string, { gain: GainNode; analyser: AnalyserNode }> = {};
@@ -598,24 +863,20 @@ export const useAudioEngine = () => {
         if (!playableTracks.has(track.id)) continue;
         const gain = ctx.createGain();
         gain.gain.value = isFinite(track.volume) ? track.volume : 0.8;
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 2048;
-        analyser.smoothingTimeConstant = 0.75;
-        gain.connect(analyser);
-        analyser.connect(masterGainRef.current);
-        trackBusses[track.id] = { gain, analyser };
-        trackAnalysersRef.current[track.id] = analyser;
+        const an = ctx.createAnalyser();
+        an.fftSize = 2048; an.smoothingTimeConstant = 0.75;
+        gain.connect(an);
+        an.connect(masterGainRef.current);
+        trackBusses[track.id]               = { gain, analyser: an };
+        trackAnalysersRef.current[track.id] = an;
         trackGainsRef.current[track.id]     = gain;
       }
 
       const offset = currentTimeRef.current;
       for (const region of state.regions) {
         if (!playableTracks.has(region.trackId)) continue;
-        if (region.isMuted) continue;
-        if (!region.audioUrl) continue;
+        if (region.isMuted || !region.audioUrl) continue;
         if (region.startTime + region.duration <= offset) continue;
-
-        // Fetch + schedule asynchronously — OK since these are pre-recorded clips
         const cachedBuf = bufferCacheRef.current.get(region.audioUrl);
         (cachedBuf
           ? Promise.resolve(cachedBuf)
@@ -624,7 +885,7 @@ export const useAudioEngine = () => {
               .then(ab => ctx.decodeAudioData(ab))
               .then(buf => { bufferCacheRef.current.set(region.audioUrl, buf); return buf; })
         ).then(audioBuffer => {
-            if (recId !== playIdRef.current) return; // stop was pressed
+            if (recId !== playIdRef.current) return;
             const source = ctx.createBufferSource();
             source.buffer = audioBuffer;
             const bus = trackBusses[region.trackId];
@@ -635,7 +896,7 @@ export const useAudioEngine = () => {
             source.start(whenInAudio, fileOffset, playDuration);
             activeSourcesRef.current.push(source);
           })
-          .catch(() => { /* skip undecodable */ });
+          .catch(() => {});
       }
 
       if (state.transport.metronomeOn) {
@@ -660,6 +921,17 @@ export const useAudioEngine = () => {
     }
   }, [state, dispatch, currentTimeRef, getAudioCtx, startAnimLoop, scheduleClick, startMetronome, userRole, masterStreamRef]);
 
+  // Input monitoring: toggle mic-to-speakers whenever track.isMonitoring changes
+  useEffect(() => {
+    if (!monitorGainRef.current) return;
+    const armedTrack = state.tracks.find(t => t.isArmed);
+    monitorGainRef.current.gain.setTargetAtTime(
+      armedTrack?.isMonitoring ? 1 : 0,
+      audioCtxRef.current?.currentTime ?? 0,
+      0.01,
+    );
+  }, [state.tracks, audioCtxRef]);
+
   // Restart click scheduler immediately when tempo or time signature changes during playback
   useEffect(() => {
     if (!state.transport.isPlaying || !state.transport.metronomeOn) return;
@@ -674,5 +946,70 @@ export const useAudioEngine = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.transport.tempo, state.transport.timeSignature]);
 
-  return { play, pause, stop, record, stopRecordingSession, initAudioCtx: getAudioCtx };
+  // Seek during playback: tear down current sources and restart from new position
+  const seek = useCallback(async (t: number) => {
+    const wasPlaying = state.transport.isPlaying;
+    currentTimeRef.current = Math.max(0, t);
+    dispatch({ type: 'SET_CURRENT_TIME', payload: Math.max(0, t) });
+    if (wasPlaying) {
+      ++playIdRef.current;
+      stopAnimLoop();
+      stopSources();
+      stopMetronome();
+      // play() reads currentTimeRef.current as the offset
+      await play();
+    }
+  }, [state.transport.isPlaying, currentTimeRef, dispatch, stopAnimLoop, stopSources, stopMetronome, play]);
+
+  // Pre-warm the decode cache whenever regions change so the first play is instant.
+  // Runs in the background — never blocks the UI or delays play().
+  useEffect(() => {
+    const urls = [...new Set(
+      state.regions
+        .filter(r => r.audioUrl && !bufferCacheRef.current.has(r.audioUrl))
+        .map(r => r.audioUrl)
+    )];
+    if (urls.length === 0) return;
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+    let cancelled = false;
+    (async () => {
+      for (const url of urls) {
+        if (cancelled || bufferCacheRef.current.has(url)) continue;
+        try {
+          const resp = await fetch(url);
+          const ab   = await resp.arrayBuffer();
+          if (cancelled) break;
+          const buf  = await ctx.decodeAudioData(ab);
+          bufferCacheRef.current.set(url, buf);
+        } catch { /* non-fatal — play() will retry */ }
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.regions]);
+
+  const retryUpload = useCallback((poolItemId: string) => {
+    const blob = pendingRetryBlobs.get(poolItemId);
+    const item = state.poolItems.find(p => p.id === poolItemId);
+    if (!blob || !item) return;
+    dispatch({ type: 'SET_POOL_ITEM_UPLOAD_STATUS', payload: { id: poolItemId, status: 'uploading' } });
+    uploadAudioToSupabase(blob, item.localFileName ?? `${item.name}.wav`)
+      .then(({ publicUrl, storagePath }) => {
+        pendingRetryBlobs.delete(poolItemId);
+        dispatch({ type: 'SET_POOL_ITEM_UPLOAD_STATUS', payload: { id: poolItemId, status: 'done', storagePath } });
+        const localUrl = item.audioUrl;
+        if (publicUrl !== localUrl) {
+          dispatch({ type: 'UPDATE_AUDIO_URLS', payload: { poolItemId, audioUrl: publicUrl } });
+        }
+      })
+      .catch(() => {
+        dispatch({ type: 'SET_POOL_ITEM_UPLOAD_STATUS', payload: { id: poolItemId, status: 'failed' } });
+      });
+  }, [state.poolItems, dispatch]);
+
+  // Register so any component can call retryUpload via context
+  retryUploadRef.current = retryUpload;
+
+  return { play, pause, stop, record, seek, stopRecordingSession, initAudioCtx: getAudioCtx };
 };
