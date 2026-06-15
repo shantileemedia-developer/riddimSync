@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Video, Mic, MicOff, VideoOff, Minimize2, X, PhoneCall, MessageSquare, MonitorPlay, MonitorX, Smile } from 'lucide-react';
+import { Video, Mic, MicOff, VideoOff, Minimize2, X, PhoneCall, MessageSquare, MonitorPlay, MonitorX, Smile, SendHorizonal } from 'lucide-react';
 
 const EMOJIS: Record<string, string[]> = {
   '😀': ['😀','😂','🤣','😍','🥹','😎','🤔','😅','🥺','😭','😤','🤯','🥳','😴','🤩','😬','🙄','😏','😒','🤗','😇','🫡','🤫','😶','🤐'],
@@ -16,8 +16,7 @@ interface FloatingVideoChatProps {
   userId: string;
   roomCode: string;
   onInputEvent?: (event: RemoteInputEvent) => void;
-  /** active, sendFn, remoteScreenStream, viewOnly */
-  onRcStateChange?: (active: boolean, sendFn: ((e: RemoteInputEvent) => void) | null, screenStream: MediaStream | null, viewOnly: boolean) => void;
+  onRcStateChange?: (active: boolean, sendFn: ((e: RemoteInputEvent) => void) | null, viewOnly: boolean) => void;
   /** Stable refs from DawContext — passed as props to avoid context subscription inside this component */
   masterStreamRef: React.MutableRefObject<MediaStreamAudioDestinationNode | null>;
   audioCtxRef: React.MutableRefObject<AudioContext | null>;
@@ -198,7 +197,7 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
   const monitorSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
   const {
-    localStream, remoteStream, remoteDawStream, remoteScreenStream, isConnected, callActive,
+    localStream, remoteStream, remoteDawStream, isConnected, callActive,
     isMicOn, isVideoOn,
     incomingCall, isCalling, callerId, messages,
     ring, acceptCall, declineCall, sendMessage,
@@ -207,7 +206,7 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
     rcEngineerName, rcViewOnly,
     requestRemoteControl, stopRemoteControl,
     respondToRcPermission,
-    sendInputEvent,
+    sendInputEvent, syncDawStream,
     switchCallAudioBus, activeCallBus,
   } = useWebRTC({
     roomCode,
@@ -305,26 +304,19 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
   useEffect(() => { if (!rcRequested) setRcDenied(false); }, [rcRequested]);
 
   useEffect(() => {
-    onRcStateChange?.(rcActive, rcActive ? sendInputEvent : null, rcActive ? remoteScreenStream : null, rcViewOnly);
-  }, [rcActive, sendInputEvent, onRcStateChange, remoteScreenStream, rcViewOnly]);
+    onRcStateChange?.(rcActive, rcActive ? sendInputEvent : null, rcViewOnly);
+  }, [rcActive, sendInputEvent, onRcStateChange, rcViewOnly]);
 
-  // Artist: broadcast cursor position to engineer while RC is active (~30 fps)
+  // Artist: ensure the DAW master-out track is in the live peer connection.
+  // Called when the call becomes active AND again after a short delay in case
+  // the master stream wasn't initialised yet at call-start time.
   useEffect(() => {
-    if (!rcActive || userRole !== 'artist') return;
-    let lastSent = 0;
-    const onMouseMove = (e: MouseEvent) => {
-      const now = Date.now();
-      if (now - lastSent < 33) return;
-      lastSent = now;
-      sendInputEvent({
-        type: 'artist-cursor',
-        nx: e.clientX / window.innerWidth,
-        ny: e.clientY / window.innerHeight,
-      });
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    return () => window.removeEventListener('mousemove', onMouseMove);
-  }, [rcActive, userRole, sendInputEvent]);
+    if (!callActive || userRole !== 'artist') return;
+    syncDawStream();
+    const t = setTimeout(syncDawStream, 2000);
+    return () => clearTimeout(t);
+  }, [callActive, userRole, syncDawStream]);
+
 
   // ── Camera preview — starts when widget opens, releases when call goes active ──
   useEffect(() => {
@@ -596,6 +588,21 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
                   }
                 }}
               />
+              <button
+                className="chat-send-btn"
+                disabled={!chatInput.trim()}
+                onClick={() => {
+                  if (!chatInput.trim()) return;
+                  sendMessage(chatInput.trim());
+                  setChatInput('');
+                  setShowEmojiPicker(false);
+                  chatInputRef.current?.focus();
+                }}
+                title="Send"
+                type="button"
+              >
+                <SendHorizonal size={14} />
+              </button>
             </div>
           </div>
         )}

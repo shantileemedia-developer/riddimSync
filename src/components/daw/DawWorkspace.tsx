@@ -40,10 +40,7 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   const [toast, setToast] = useState<{ msg: string; id: number } | null>(null);
   const [rcActive, setRcActive] = useState(false);
   const [rcViewOnly, setRcViewOnly] = useState(false);
-  const [rcScreenStream, setRcScreenStream] = useState<MediaStream | null>(null);
   const [remoteCursorPos, setRemoteCursorPos] = useState<{ nx: number; ny: number } | null>(null);
-  const [artistCursorPos, setArtistCursorPos] = useState<{ nx: number; ny: number } | null>(null);
-  const artistCursorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendRcInputRef = useRef<((e: RemoteInputEvent) => void) | null>(null);
 
   const webAudio   = useAudioEngine();
@@ -101,18 +98,12 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   const handleRcStateChange = useCallback((
     active: boolean,
     sendFn: ((e: RemoteInputEvent) => void) | null,
-    screenStream: MediaStream | null,
     viewOnly: boolean,
   ) => {
     setRcActive(active);
     setRcViewOnly(viewOnly);
     sendRcInputRef.current = sendFn;
-    setRcScreenStream(active ? screenStream : null);
-    if (!active) {
-      setRemoteCursorPos(null);
-      setArtistCursorPos(null);
-      if (artistCursorTimerRef.current) clearTimeout(artistCursorTimerRef.current);
-    }
+    if (!active) setRemoteCursorPos(null);
   }, []);
 
   // Always-current snapshot of panelSizes for use in closure callbacks
@@ -163,20 +154,9 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   }, []);
 
   const handleInputEvent = useCallback((event: RemoteInputEvent) => {
-    if (userRole === 'artist') {
-      // Show engineer's cursor position on artist screen, then replay the input
-      if (event.type === 'pointermove') {
-        setRemoteCursorPos({ nx: event.nx, ny: event.ny });
-      }
-      if (event.type !== 'artist-cursor') replayEvent(event);
-    } else {
-      // Engineer: receive artist cursor and display it on the RC overlay
-      if (event.type === 'artist-cursor') {
-        setArtistCursorPos({ nx: event.nx, ny: event.ny });
-        if (artistCursorTimerRef.current) clearTimeout(artistCursorTimerRef.current);
-        artistCursorTimerRef.current = setTimeout(() => setArtistCursorPos(null), 3000);
-      }
-    }
+    if (userRole !== 'artist') return;
+    if (event.type === 'pointermove') setRemoteCursorPos({ nx: event.nx, ny: event.ny });
+    replayEvent(event);
   }, [userRole, replayEvent]);
 
   const handlePlay = () => {
@@ -421,11 +401,9 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
       {rcActive && userRole === 'engineer' && (
         <RemoteControlOverlay
           userRole="engineer"
-          remoteScreenStream={rcScreenStream}
           onSendInput={(e) => sendRcInputRef.current?.(e)}
           onExit={() => setRcActive(false)}
           viewOnly={rcViewOnly}
-          artistCursorPos={artistCursorPos}
         />
       )}
       {rcActive && userRole === 'artist' && (

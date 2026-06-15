@@ -602,6 +602,28 @@
   background: rgba(0,255,204,0.07);
 }
 
+.chat-send-btn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 255, 204, 0.12);
+  border: 1px solid rgba(0, 255, 204, 0.35);
+  border-radius: 6px;
+  color: #00ffcc;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.chat-send-btn:hover:not(:disabled) {
+  background: rgba(0, 255, 204, 0.22);
+}
+.chat-send-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .emoji-picker {
   position: absolute;
   bottom: calc(100% + 6px);

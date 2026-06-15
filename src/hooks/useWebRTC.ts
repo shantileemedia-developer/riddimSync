@@ -40,7 +40,6 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [remoteDawStream, setRemoteDawStream] = useState<MediaStream | null>(null);
-  const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [callActive, setCallActive] = useState(false);
   const [isMicOn, setIsMicOn] = useState(true);
@@ -110,7 +109,6 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const callActiveRef = useRef(false);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
-  const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const onInputEventRef = useRef(onInputEvent);
 
   // ── RC-only peer connection refs (independent of the video call) ──────────
@@ -147,15 +145,27 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
       }
     };
 
-    // Identify streams by track composition to handle camera, DAW audio, and screen share
-    pc.ontrack = (event) => {
-      const stream = event.streams[0];
+    // Identify streams using track.kind — avoids the race condition where audio
+    // and video ontrack events fire separately (Unified Plan) and stream.getVideoTracks()
+    // is empty when the audio track arrives first.
+    pc.ontrack = ({ track, streams }) => {
+      const stream = streams[0];
       if (!stream) return;
-      const hasVideo = stream.getVideoTracks().length > 0;
-      const hasAudio = stream.getAudioTracks().length > 0;
-      if (hasVideo && hasAudio) setRemoteStream(stream);
-      else if (hasAudio && !hasVideo) setRemoteDawStream(stream);
-      else if (hasVideo && !hasAudio) setRemoteScreenStream(stream);
+      if (track.kind === 'video') {
+        // Any video on the main PC = camera stream.
+        setRemoteStream(stream);
+        // Fix race: audio may have landed in remoteDawStream when it arrived first
+        // with no video in the stream yet — undo that misclassification.
+        setRemoteDawStream(prev => (prev?.id === stream.id ? null : prev));
+      } else {
+        // Audio track: if the stream already has a video track it's the camera mic;
+        // otherwise it's the DAW audio bus (no video, audio only).
+        if (stream.getVideoTracks().length > 0) {
+          setRemoteStream(stream);
+        } else {
+          setRemoteDawStream(stream);
+        }
+      }
     };
 
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -164,13 +174,33 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
       const s = pc.connectionState;
       setIsConnected(s === 'connected');
 
-      if (s === 'disconnected') {
+      if (s === 'connected') {
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        // Apply low-latency encoder settings now that the connection is live.
+        // Capping video at 1.5 Mbps prevents buffer bloat on the encoder side.
+        pc.getSenders().forEach(async sender => {
+          if (!sender.track) return;
+          try {
+            const params = sender.getParameters();
+            if (!params.encodings?.length) params.encodings = [{}];
+            if (sender.track.kind === 'video') {
+              params.encodings[0].maxBitrate      = 1_500_000;
+              params.encodings[0].maxFramerate    = 30;
+              params.encodings[0].networkPriority = 'high' as RTCPriorityType;
+            } else if (sender.track.kind === 'audio') {
+              params.encodings[0].maxBitrate      = 128_000;
+              params.encodings[0].networkPriority = 'very-high' as RTCPriorityType;
+            }
+            await sender.setParameters(params);
+          } catch { /* browser may not support all params */ }
+        });
+      } else if (s === 'disconnected') {
         reconnectTimer = setTimeout(() => {
           if (pcRef.current?.connectionState === 'disconnected') {
             pcRef.current.restartIce();
           }
         }, 5000);
-      } else if (s === 'connected' || s === 'closed') {
+      } else if (s === 'closed') {
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       }
     };
@@ -262,7 +292,6 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
     // Either side: RC session ended
     channel.on('broadcast', { event: 'stop-rc' }, () => {
       setRcActive(false);
-      setRemoteScreenStream(null);
       setIsScreenSharing(false);
       setRcRequested(false);
       handleRcOfferRef.current = null;
@@ -271,7 +300,7 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
       pendingRcIceRef.current = [];
     });
 
-    // Engineer receives: artist accepted → create RC peer connection + offer
+    // Engineer receives: artist accepted → create RC peer connection (data channel only)
     channel.on('broadcast', { event: 'rc-accepted' }, async () => {
       if (!isInitiator) return;
       if (rcPcRef.current) { rcPcRef.current.close(); rcPcRef.current = null; }
@@ -283,17 +312,13 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
         if (candidate) channel.send({ type: 'broadcast', event: 'rc-ice', payload: { candidate, from: userId } });
       };
 
-      pc.ontrack = ({ streams }) => {
-        if (streams[0]) setRemoteScreenStream(streams[0]);
-      };
-
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'connected') { setRcActive(true); setRcRequested(false); }
         if (pc.connectionState === 'failed') pc.restartIce();
-        if (pc.connectionState === 'closed') { setRcActive(false); setRemoteScreenStream(null); }
+        if (pc.connectionState === 'closed') { setRcActive(false); }
       };
 
-      // Engineer creates the data channel for sending input events to artist
+      // Data channel carries input events from engineer → artist (no video needed)
       const dc = pc.createDataChannel('rc-input', { ordered: false, maxRetransmits: 0 });
       dc.onmessage = (e) => {
         try { onInputEventRef.current?.(JSON.parse(e.data)); } catch {}
@@ -350,19 +375,46 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
       // Instead, subscribe to the 'mic-input' bus via AudioRouter which reuses
       // the engine's already-open input stream.
       const nativeAvail = await window.audioEngine?.isAvailable().catch(() => false);
+      // Low-latency audio constraints: both sides use headphones in a studio,
+      // so echo cancellation and noise suppression are unnecessary and add latency.
+      const LOW_LAT_AUDIO = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        // Chromium honours this hint to minimise capture buffer size
+        latency: 0,
+      } as MediaTrackConstraints;
+
+      const VIDEO_CONSTRAINTS = {
+        width:     { ideal: 1280 },
+        height:    { ideal: 720 },
+        frameRate: { ideal: 30, max: 30 },
+      } as MediaTrackConstraints;
+
       if (nativeAvail) {
-        const busStream  = acquireCallAudioStream('mic-input');
+        const busStream   = acquireCallAudioStream('mic-input');
         const videoStream = await navigator.mediaDevices
-          .getUserMedia({ video: true, audio: false })
+          .getUserMedia({ video: VIDEO_CONSTRAINTS, audio: false })
           .catch(() => new MediaStream());
+
+        // If the AudioRouter mic-input bus isn't ready (e.g. no interface configured),
+        // fall back to standard getUserMedia so the call still carries mic audio.
+        let audioTracks: MediaStreamTrack[] = busStream?.getAudioTracks() ?? [];
+        if (audioTracks.length === 0) {
+          const fallback = await navigator.mediaDevices
+            .getUserMedia({ audio: LOW_LAT_AUDIO })
+            .catch(() => null);
+          audioTracks = fallback?.getAudioTracks() ?? [];
+        }
+
         stream = new MediaStream([
           ...videoStream.getVideoTracks(),
-          ...(busStream ? busStream.getAudioTracks() : []),
+          ...audioTracks,
         ]);
       } else {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+          video: VIDEO_CONSTRAINTS,
+          audio: LOW_LAT_AUDIO,
         });
       }
 
@@ -457,9 +509,8 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t => t.stop()); localStreamRef.current = null; }
     if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
-    if (screenTrackRef.current) { screenTrackRef.current.stop(); screenTrackRef.current = null; }
     pendingCandidatesRef.current = [];
-    setLocalStream(null); setRemoteStream(null); setRemoteDawStream(null); setRemoteScreenStream(null);
+    setLocalStream(null); setRemoteStream(null); setRemoteDawStream(null);
     setIsConnected(false); setCallActive(false); callActiveRef.current = false;
     setIsCalling(false); setIncomingCall(false);
     setIsScreenSharing(false);
@@ -505,104 +556,64 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
     signalChannelRef.current?.send({ type: 'broadcast', event: 'request-rc', payload: { from: userId, engineerName } });
   }, [isInitiator, userId]);
 
-  // Artist: capture screen and set up the RC answer handler, then signal engineer
-  const startScreenShare = useCallback(async () => {
+  // Artist: accept RC — set up a data-channel-only peer connection (no screen capture).
+  // The engineer sees their own identical copy of the app; we just forward their inputs.
+  const startScreenShare = useCallback(() => {
     if (isInitiator) return;
-    try {
-      let stream: MediaStream;
 
-      if (typeof window !== 'undefined' && window.studioRC) {
-        const sources = await window.studioRC.getScreenSources();
-        if (!sources?.length) throw new Error('No screen sources found');
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            mandatory: {
-              chromeMediaSource: 'desktop',
-              chromeMediaSourceId: sources[0].id,
-              minFrameRate: 30,
-              maxFrameRate: 30,
-            }
-          } as any,
+    setIsScreenSharing(true);
+    setRcRequested(false);
+
+    // One-shot handler: called when engineer's rc-offer arrives.
+    handleRcOfferRef.current = async (offer: RTCSessionDescriptionInit) => {
+      handleRcOfferRef.current = null;
+      try {
+        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+        pc.onicecandidate = ({ candidate }) => {
+          if (candidate) {
+            signalChannelRef.current?.send({
+              type: 'broadcast', event: 'rc-ice',
+              payload: { candidate, from: userId },
+            });
+          }
+        };
+
+        pc.ondatachannel = (e) => {
+          rcDataChannelRef.current = e.channel;
+          e.channel.onmessage = (msg) => {
+            if (rcViewOnlyRef.current) return;
+            try { onInputEventRef.current?.(JSON.parse(msg.data)); } catch {}
+          };
+        };
+
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === 'connected') setRcActive(true);
+          if (pc.connectionState === 'failed') pc.restartIce();
+          if (pc.connectionState === 'closed') { setRcActive(false); setIsScreenSharing(false); }
+        };
+
+        rcPcRef.current = pc;
+        await pc.setRemoteDescription(offer);
+        for (const c of pendingRcIceRef.current) await pc.addIceCandidate(c).catch(() => {});
+        pendingRcIceRef.current = [];
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        signalChannelRef.current?.send({
+          type: 'broadcast', event: 'rc-answer',
+          payload: { answer, from: userId },
         });
-      } else {
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { frameRate: 30 } as MediaTrackConstraints,
-          audio: false,
-        });
+
+        setRcActive(true);
+      } catch (e) {
+        console.error('[RC] handleRcOffer error', e);
+        setIsScreenSharing(false);
       }
+    };
 
-      const track = stream.getVideoTracks()[0];
-      screenTrackRef.current = track;
-      setIsScreenSharing(true);
-      setRcRequested(false);
-
-      // Wire up the one-shot offer handler. When rc-offer arrives (from engineer
-      // after receiving rc-accepted), this creates the RC peer connection and answers.
-      handleRcOfferRef.current = async (offer: RTCSessionDescriptionInit) => {
-        if (!screenTrackRef.current) return;
-        handleRcOfferRef.current = null; // one-shot
-
-        try {
-          const trackStream = new MediaStream([screenTrackRef.current]);
-          const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-
-          pc.onicecandidate = ({ candidate }) => {
-            if (candidate) {
-              signalChannelRef.current?.send({
-                type: 'broadcast', event: 'rc-ice',
-                payload: { candidate, from: userId },
-              });
-            }
-          };
-
-          pc.ondatachannel = (e) => {
-            rcDataChannelRef.current = e.channel;
-            e.channel.onmessage = (msg) => {
-              if (rcViewOnlyRef.current) return;
-              try { onInputEventRef.current?.(JSON.parse(msg.data)); } catch {}
-            };
-          };
-
-          pc.onconnectionstatechange = () => {
-            if (pc.connectionState === 'connected') setRcActive(true);
-            if (pc.connectionState === 'failed') pc.restartIce();
-            if (pc.connectionState === 'closed') { setRcActive(false); setIsScreenSharing(false); }
-          };
-
-          pc.addTrack(screenTrackRef.current, trackStream);
-          rcPcRef.current = pc;
-
-          await pc.setRemoteDescription(offer);
-          for (const c of pendingRcIceRef.current) await pc.addIceCandidate(c).catch(() => {});
-          pendingRcIceRef.current = [];
-
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          signalChannelRef.current?.send({
-            type: 'broadcast', event: 'rc-answer',
-            payload: { answer, from: userId },
-          });
-
-          setRcActive(true);
-        } catch (e) {
-          console.error('[RC] handleRcOffer error', e);
-          setIsScreenSharing(false);
-        }
-      };
-
-      track.onended = () => revokeRemoteControl();
-
-      // Tell engineer we accepted — they'll send back an rc-offer
-      signalChannelRef.current?.send({ type: 'broadcast', event: 'rc-accepted', payload: { from: userId } });
-
-    } catch (err) {
-      console.error('[RC] Failed to start screen share', err);
-      setRcRequested(false);
-      setIsScreenSharing(false);
-    }
-  // revokeRemoteControl defined below — ref avoids circular dep
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Tell engineer we're ready — they'll send an rc-offer
+    signalChannelRef.current?.send({ type: 'broadcast', event: 'rc-accepted', payload: { from: userId } });
   }, [isInitiator, userId]);
 
   // Artist: respond to the engineer's permission request
@@ -620,9 +631,8 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
     startScreenShare();
   }, [userId, startScreenShare]);
 
-  // Artist: stop sharing and revoke RC
+  // Artist: revoke RC
   const revokeRemoteControl = useCallback(() => {
-    if (screenTrackRef.current) { screenTrackRef.current.stop(); screenTrackRef.current = null; }
     if (rcDataChannelRef.current) { rcDataChannelRef.current.close(); rcDataChannelRef.current = null; }
     if (rcPcRef.current) { rcPcRef.current.close(); rcPcRef.current = null; }
     pendingRcIceRef.current = [];
@@ -637,7 +647,7 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
     if (rcDataChannelRef.current) { rcDataChannelRef.current.close(); rcDataChannelRef.current = null; }
     if (rcPcRef.current) { rcPcRef.current.close(); rcPcRef.current = null; }
     pendingRcIceRef.current = [];
-    setRcActive(false); setRemoteScreenStream(null);
+    setRcActive(false);
     signalChannelRef.current?.send({ type: 'broadcast', event: 'stop-rc', payload: { from: userId } });
   }, [isInitiator, userId]);
 
@@ -649,10 +659,25 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
     }
   }, []);
 
+  // Artist: call this after the DAW master-out stream is ready (or any time it
+  // changes) to ensure the audio track is in the live peer connection.
+  // If the call hadn't started yet when the stream was first available, this
+  // adds it now and onnegotiationneeded handles the renegotiation.
+  const syncDawStream = useCallback(() => {
+    const pc  = pcRef.current;
+    const stream = getDawStream?.();
+    if (!pc || !stream) return;
+    const existing = new Set(pc.getSenders().map(s => s.track?.id));
+    stream.getAudioTracks().forEach(track => {
+      if (!existing.has(track.id)) pc.addTrack(track, stream);
+    });
+    // onnegotiationneeded fires automatically when new tracks are added
+  }, [getDawStream]);
+
   useEffect(() => { return () => { endCall(); }; }, [endCall]);
 
   return {
-    localStream, remoteStream, remoteDawStream, remoteScreenStream,
+    localStream, remoteStream, remoteDawStream,
     isConnected, callActive, isMicOn, isVideoOn,
     isScreenSharing, rcRequested, rcActive,
     rcEngineerName, rcViewOnly, audioDeviceControlAllowed,
@@ -661,7 +686,7 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
     endCall, toggleMic, toggleVideo,
     requestRemoteControl, startScreenShare, revokeRemoteControl, stopRemoteControl,
     respondToRcPermission,
-    sendInputEvent,
+    sendInputEvent, syncDawStream,
     // Communication ↔ DAW bridge: lets engineer switch which bus feeds the call
     switchCallAudioBus,
     activeCallBus: activeBusRef.current,
