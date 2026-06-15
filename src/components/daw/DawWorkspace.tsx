@@ -16,7 +16,7 @@ import TopToolbar from './TopToolbar';
 import MenuBar from './MenuBar';
 import PreferencesDialog from './PreferencesDialog';
 import FloatingVideoChat from './FloatingVideoChat';
-import RemoteControlOverlay from './RemoteControlOverlay';
+import RemoteControlOverlay, { type RemoteControlOverlayHandle } from './RemoteControlOverlay';
 import MixerPanel from './MixerPanel';
 import AudioMIDIPreferencesDialog from './AudioMIDIPreferencesDialog';
 import LyricsPanel from './LyricsPanel';
@@ -40,8 +40,10 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   const [toast, setToast] = useState<{ msg: string; id: number } | null>(null);
   const [rcActive, setRcActive] = useState(false);
   const [rcViewOnly, setRcViewOnly] = useState(false);
-  const [remoteCursorPos, setRemoteCursorPos] = useState<{ nx: number; ny: number } | null>(null);
-  const sendRcInputRef = useRef<((e: RemoteInputEvent) => void) | null>(null);
+  const sendRcInputRef   = useRef<((e: RemoteInputEvent) => void) | null>(null);
+  const rcOverlayRef     = useRef<RemoteControlOverlayHandle>(null);
+  // Stable callback — never recreated, so engineer's window listeners are never torn down
+  const onSendRcInput    = useCallback((e: RemoteInputEvent) => sendRcInputRef.current?.(e), []);
 
   const webAudio   = useAudioEngine();
   const nativeAudio = useNativeAudioEngine();
@@ -110,7 +112,6 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
     setRcActive(active);
     setRcViewOnly(viewOnly);
     sendRcInputRef.current = sendFn;
-    if (!active) setRemoteCursorPos(null);
   }, []);
 
   // Always-current snapshot of panelSizes for use in closure callbacks
@@ -162,7 +163,8 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
 
   const handleInputEvent = useCallback((event: RemoteInputEvent) => {
     if (userRole !== 'artist') return;
-    if (event.type === 'pointermove') setRemoteCursorPos({ nx: event.nx, ny: event.ny });
+    // Update cursor directly in DOM — no React state, no re-render
+    if (event.type === 'pointermove') rcOverlayRef.current?.moveCursor(event.nx, event.ny);
     replayEvent(event);
   }, [userRole, replayEvent]);
 
@@ -408,15 +410,15 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
       {rcActive && userRole === 'engineer' && (
         <RemoteControlOverlay
           userRole="engineer"
-          onSendInput={(e) => sendRcInputRef.current?.(e)}
+          onSendInput={onSendRcInput}
           onExit={() => setRcActive(false)}
           viewOnly={rcViewOnly}
         />
       )}
       {rcActive && userRole === 'artist' && (
         <RemoteControlOverlay
+          ref={rcOverlayRef}
           userRole="artist"
-          remoteCursorPos={remoteCursorPos}
           onRevoke={() => setRcActive(false)}
           viewOnly={rcViewOnly}
         />

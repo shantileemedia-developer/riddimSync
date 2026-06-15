@@ -176,8 +176,7 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
 
       if (s === 'connected') {
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-        // Apply low-latency encoder settings now that the connection is live.
-        // Capping video at 1.5 Mbps prevents buffer bloat on the encoder side.
+        // Encoder: cap video bitrate, prioritise audio
         pc.getSenders().forEach(async sender => {
           if (!sender.track) return;
           try {
@@ -193,6 +192,12 @@ export const useWebRTC = ({ roomCode, userId, isInitiator, getDawStream, onInput
             }
             await sender.setParameters(params);
           } catch { /* browser may not support all params */ }
+        });
+        // Jitter buffer: minimize buffering delay on audio receivers (Chrome 115+)
+        pc.getReceivers().forEach(receiver => {
+          if (receiver.track.kind === 'audio') {
+            try { (receiver as any).jitterBufferTarget = 0; } catch {}
+          }
         });
       } else if (s === 'disconnected') {
         reconnectTimer = setTimeout(() => {

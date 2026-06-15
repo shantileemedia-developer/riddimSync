@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { RemoteInputEvent } from '../../types/remote';
 import './RemoteControlOverlay.css';
@@ -8,48 +8,80 @@ interface Props {
   onSendInput?: (event: RemoteInputEvent) => void;
   onRevoke?: () => void;
   onExit?: () => void;
-  remoteCursorPos?: { nx: number; ny: number } | null;
   viewOnly?: boolean;
 }
 
-const RemoteControlOverlay: React.FC<Props> = ({
-  userRole, onSendInput, onRevoke, onExit, remoteCursorPos, viewOnly,
-}) => {
+export interface RemoteControlOverlayHandle {
+  moveCursor: (nx: number, ny: number) => void;
+}
 
-  // ── Engineer: forward all interactions to artist via window listeners ─────
-  // The engineer controls their own (identical) app — no screen share needed.
+const RemoteControlOverlay = forwardRef<RemoteControlOverlayHandle, Props>((
+  { userRole, onSendInput, onRevoke, onExit, viewOnly },
+  ref,
+) => {
+  const cursorRef = useRef<HTMLDivElement>(null);
+
+  // Stable refs so event listeners never need to be torn down due to prop changes
+  const onSendInputRef = useRef(onSendInput);
+  const onExitRef      = useRef(onExit);
+  const onRevokeRef    = useRef(onRevoke);
+  useEffect(() => { onSendInputRef.current = onSendInput; }, [onSendInput]);
+  useEffect(() => { onExitRef.current      = onExit;      }, [onExit]);
+  useEffect(() => { onRevokeRef.current    = onRevoke;    }, [onRevoke]);
+
+  // Expose direct DOM cursor update — bypasses React state/re-render entirely
+  useImperativeHandle(ref, () => ({
+    moveCursor: (nx: number, ny: number) => {
+      const el = cursorRef.current;
+      if (!el) return;
+      el.style.left    = `${nx * 100}%`;
+      el.style.top     = `${ny * 100}%`;
+      el.style.display = 'block';
+    },
+  }));
+
+  // ── Engineer: forward events, rAF-throttle pointermove ───────────────────
   useEffect(() => {
     if (userRole !== 'engineer') return;
 
-    const norm = (e: MouseEvent | PointerEvent | WheelEvent) => ({
+    const norm = (e: PointerEvent | MouseEvent | WheelEvent) => ({
       nx: e.clientX / window.innerWidth,
       ny: e.clientY / window.innerHeight,
     });
 
-    const onPointerDown = (e: PointerEvent) => {
-      const { nx, ny } = norm(e);
-      onSendInput?.({ type: 'pointerdown', nx, ny, button: e.button, buttons: e.buttons });
+    // Cap pointermove sends to one per animation frame (~60fps)
+    let pendingMove: RemoteInputEvent | null = null;
+    let rafId: number | null = null;
+    const flushMove = () => {
+      if (pendingMove) { onSendInputRef.current?.(pendingMove); pendingMove = null; }
+      rafId = null;
     };
+
     const onPointerMove = (e: PointerEvent) => {
       const { nx, ny } = norm(e);
-      onSendInput?.({ type: 'pointermove', nx, ny, button: e.button, buttons: e.buttons });
+      pendingMove = { type: 'pointermove', nx, ny, button: e.button, buttons: e.buttons };
+      if (!rafId) rafId = requestAnimationFrame(flushMove);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      const { nx, ny } = norm(e);
+      onSendInputRef.current?.({ type: 'pointerdown', nx, ny, button: e.button, buttons: e.buttons });
     };
     const onPointerUp = (e: PointerEvent) => {
       const { nx, ny } = norm(e);
-      onSendInput?.({ type: 'pointerup', nx, ny, button: e.button, buttons: 0 });
+      onSendInputRef.current?.({ type: 'pointerup', nx, ny, button: e.button, buttons: 0 });
     };
     const onDblClick = (e: MouseEvent) => {
-      onSendInput?.({ type: 'dblclick', ...norm(e), button: e.button });
+      onSendInputRef.current?.({ type: 'dblclick', ...norm(e), button: e.button });
     };
     const onContextMenu = (e: MouseEvent) => {
-      onSendInput?.({ type: 'contextmenu', ...norm(e), button: e.button });
+      onSendInputRef.current?.({ type: 'contextmenu', ...norm(e), button: e.button });
     };
     const onWheel = (e: WheelEvent) => {
-      onSendInput?.({ type: 'wheel', ...norm(e), deltaX: e.deltaX, deltaY: e.deltaY });
+      onSendInputRef.current?.({ type: 'wheel', ...norm(e), deltaX: e.deltaX, deltaY: e.deltaY });
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onExit?.(); return; }
-      onSendInput?.({
+      if (e.key === 'Escape') { onExitRef.current?.(); return; }
+      onSendInputRef.current?.({
         type: 'keydown', key: e.key, code: e.code,
         ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey,
         repeat: e.repeat,
@@ -57,7 +89,7 @@ const RemoteControlOverlay: React.FC<Props> = ({
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Escape') return;
-      onSendInput?.({
+      onSendInputRef.current?.({
         type: 'keyup', key: e.key, code: e.code,
         ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey,
         repeat: false,
@@ -74,6 +106,7 @@ const RemoteControlOverlay: React.FC<Props> = ({
     window.addEventListener('keyup',        onKeyUp,   true);
 
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       window.removeEventListener('pointerdown',  onPointerDown);
       window.removeEventListener('pointermove',  onPointerMove);
       window.removeEventListener('pointerup',    onPointerUp);
@@ -83,21 +116,22 @@ const RemoteControlOverlay: React.FC<Props> = ({
       window.removeEventListener('keydown',      onKeyDown, true);
       window.removeEventListener('keyup',        onKeyUp,   true);
     };
-  }, [userRole, onSendInput, onExit]);
+  // Only re-run if role changes — callbacks are accessed via stable refs
+  }, [userRole]);
 
   // ── Artist: ESC revokes RC ────────────────────────────────────────────────
   useEffect(() => {
     if (userRole !== 'artist') return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); onRevoke?.(); }
+      if (e.key === 'Escape') { e.preventDefault(); onRevokeRef.current?.(); }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [userRole, onRevoke]);
+  }, [userRole]);
 
   const label = viewOnly ? 'VIEW ONLY' : 'REMOTE MODE';
 
-  // ── Engineer view: just the badge — they see their own app normally ───────
+  // ── Engineer view: badge only (they see their own app natively) ───────────
   if (userRole === 'engineer') {
     return createPortal(
       <div className="rc-badge-wrap">
@@ -111,7 +145,7 @@ const RemoteControlOverlay: React.FC<Props> = ({
     );
   }
 
-  // ── Artist view: badge + single engineer cursor (artist's cursor hidden) ──
+  // ── Artist view: badge + cursor dot (DOM-direct, zero React overhead) ─────
   return (
     <>
       {createPortal(
@@ -126,18 +160,13 @@ const RemoteControlOverlay: React.FC<Props> = ({
         </div>,
         document.body,
       )}
-      {remoteCursorPos && createPortal(
-        <div
-          className="rc-remote-cursor"
-          style={{
-            left: `${remoteCursorPos.nx * 100}%`,
-            top:  `${remoteCursorPos.ny * 100}%`,
-          }}
-        />,
+      {createPortal(
+        <div ref={cursorRef} className="rc-remote-cursor" style={{ display: 'none' }} />,
         document.body,
       )}
     </>
   );
-};
+});
 
+RemoteControlOverlay.displayName = 'RemoteControlOverlay';
 export default RemoteControlOverlay;
