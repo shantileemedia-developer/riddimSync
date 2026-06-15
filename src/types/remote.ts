@@ -3,4 +3,5 @@ export type RemoteInputEvent =
   | { type: 'click' | 'dblclick' | 'contextmenu'; nx: number; ny: number; button: number }
   | { type: 'wheel'; nx: number; ny: number; deltaX: number; deltaY: number }
   | { type: 'keydown' | 'keyup'; key: string; code: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean; repeat: boolean }
-  | { type: 'artist-cursor'; nx: number; ny: number };
+  | { type: 'artist-cursor'; nx: number; ny: number }
+  | { type: 'view-sync'; zoom: number; scrollLeft: number; scrollTop: number };

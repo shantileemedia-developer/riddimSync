@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useState } from 'react';
+import React, { useRef, useEffect, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 import { ZoomIn, ZoomOut, MousePointer2, Crosshair, Scissors, Eraser, VolumeX, Pencil, FolderPlus } from 'lucide-react';
 import { useDaw } from '../../context/DawContext';
 import type { ActiveTool, Region, PoolItem } from '../../context/DawContext';
@@ -67,7 +67,14 @@ function formatPlayheadTime(secs: number): string {
 }
 
 // ── Component ────────────────────────────────────────────────────────
-const ArrangeWindow = ({ onSeek }: { onSeek?: (t: number) => void }) => {
+export interface ArrangeWindowHandle {
+  applyViewSync: (zoom: number, scrollLeft: number, scrollTop: number) => void;
+}
+
+const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
+  onSeek?: (t: number) => void;
+  onViewChange?: (zoom: number, scrollLeft: number, scrollTop: number) => void;
+}>(({ onSeek, onViewChange }, ref) => {
   const { state, dispatch, currentTimeRef, recordingStartTimeRef, livePeaksRef, audioDirHandle } = useDaw();
   const { tracks, regions, activeTool, selectedRegionId, selectedRegionIds, selectedTrackId, markers, crossfades } = state;
   const { tempo, isLooping, loopStart, loopEnd, punchIn, punchOut } = state.transport;
@@ -76,6 +83,32 @@ const ArrangeWindow = ({ onSeek }: { onSeek?: (t: number) => void }) => {
   const pxPerSec                  = BASE_PX_PER_SEC * zoom;
   const pxPerSecRef               = useRef(pxPerSec);
   pxPerSecRef.current             = pxPerSec;
+
+  // ── View-sync (RC session mirroring) ─────────────────────────────
+  const onViewChangeRef   = useRef(onViewChange);
+  useEffect(() => { onViewChangeRef.current = onViewChange; }, [onViewChange]);
+  const isSyncingRef      = useRef(false); // suppress outgoing events while applying incoming
+  const viewSyncRafRef    = useRef<number | null>(null);
+
+  const emitViewSync = useCallback(() => {
+    if (isSyncingRef.current || !onViewChangeRef.current) return;
+    if (viewSyncRafRef.current !== null) return; // already queued
+    viewSyncRafRef.current = requestAnimationFrame(() => {
+      viewSyncRafRef.current = null;
+      if (isSyncingRef.current) return;
+      const el = contentScrollRef.current;
+      onViewChangeRef.current?.(zoomRef.current, el?.scrollLeft ?? 0, el?.scrollTop ?? 0);
+    });
+  }, []);
+
+  useImperativeHandle(ref, () => ({
+    applyViewSync: (newZoom: number, newScrollLeft: number, newScrollTop: number) => {
+      isSyncingRef.current = true;
+      pendingScrollRef.current = newScrollLeft;
+      setZoom(newZoom);
+      if (contentScrollRef.current) contentScrollRef.current.scrollTop = newScrollTop;
+    },
+  }));
 
   const isPlayingRef              = useRef(state.transport.isPlaying);
   isPlayingRef.current            = state.transport.isPlaying;
@@ -345,7 +378,13 @@ const ArrangeWindow = ({ onSeek }: { onSeek?: (t: number) => void }) => {
       contentScrollRef.current.scrollLeft = pendingScrollRef.current;
       pendingScrollRef.current = null;
     }
-  }, [zoom]);
+    // If this zoom change was from an incoming sync, clear the guard; otherwise broadcast
+    if (isSyncingRef.current) {
+      isSyncingRef.current = false;
+    } else {
+      emitViewSync();
+    }
+  }, [zoom, emitViewSync]);
 
   // Project End: stored project length, auto-extended by reducer when clips exceed it.
   // Timeline always extends 5 minutes past project end so the canvas is effectively infinite.
@@ -374,7 +413,8 @@ const ArrangeWindow = ({ onSeek }: { onSeek?: (t: number) => void }) => {
     const sl = contentScrollRef.current?.scrollLeft ?? 0;
     if (rulerInnerRef.current)     rulerInnerRef.current.style.transform     = `translateX(-${sl}px)`;
     if (timeRulerInnerRef.current) timeRulerInnerRef.current.style.transform = `translateX(-${sl}px)`;
-  }, []);
+    emitViewSync();
+  }, [emitViewSync]);
 
   // ── Keyboard shortcuts ────────────────────────────────────────────
   // G/H zoom anchored to playhead; Shift+G/H = track height; B = bounce; number keys switch tools
@@ -2244,6 +2284,7 @@ const ArrangeWindow = ({ onSeek }: { onSeek?: (t: number) => void }) => {
       )}
     </div>
   );
-};
+});
 
+ArrangeWindow.displayName = 'ArrangeWindow';
 export default ArrangeWindow;

@@ -10,7 +10,7 @@ import type { RemoteInputEvent } from '../../types/remote';
 import TransportPanel from './TransportPanel';
 import InspectorPanel from './InspectorPanel';
 import TrackList from './TrackList';
-import ArrangeWindow from './ArrangeWindow';
+import ArrangeWindow, { type ArrangeWindowHandle } from './ArrangeWindow';
 import MediaPoolPanel from './MediaPoolPanel';
 import TopToolbar from './TopToolbar';
 import MenuBar from './MenuBar';
@@ -42,6 +42,9 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   const [rcViewOnly, setRcViewOnly] = useState(false);
   const sendRcInputRef   = useRef<((e: RemoteInputEvent) => void) | null>(null);
   const rcOverlayRef     = useRef<RemoteControlOverlayHandle>(null);
+  const arrangeRef       = useRef<ArrangeWindowHandle>(null);
+  const rcActiveRef      = useRef(false);
+  const lastViewSyncRef  = useRef(0);
   // Stable callback — never recreated, so engineer's window listeners are never torn down
   const onSendRcInput    = useCallback((e: RemoteInputEvent) => sendRcInputRef.current?.(e), []);
 
@@ -110,6 +113,7 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
     viewOnly: boolean,
   ) => {
     setRcActive(active);
+    rcActiveRef.current = active;
     setRcViewOnly(viewOnly);
     sendRcInputRef.current = sendFn;
   }, []);
@@ -162,11 +166,26 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   }, []);
 
   const handleInputEvent = useCallback((event: RemoteInputEvent) => {
-    if (userRole !== 'artist') return;
-    // Update cursor directly in DOM — no React state, no re-render
+    // Engineer receives view-sync from artist → mirror their view
+    if (userRole === 'engineer') {
+      if (event.type === 'view-sync') {
+        arrangeRef.current?.applyViewSync(event.zoom, event.scrollLeft, event.scrollTop);
+      }
+      return;
+    }
+    // Artist receives input events from engineer → replay them
     if (event.type === 'pointermove') rcOverlayRef.current?.moveCursor(event.nx, event.ny);
-    replayEvent(event);
+    if (event.type !== 'view-sync') replayEvent(event);
   }, [userRole, replayEvent]);
+
+  // Artist → engineer: broadcast view state changes when RC is active (max 30fps)
+  const handleViewChange = useCallback((zoom: number, scrollLeft: number, scrollTop: number) => {
+    if (!rcActiveRef.current || userRole !== 'artist') return;
+    const now = Date.now();
+    if (now - lastViewSyncRef.current < 33) return;
+    lastViewSyncRef.current = now;
+    sendRcInputRef.current?.({ type: 'view-sync', zoom, scrollLeft, scrollTop });
+  }, [userRole]);
 
   const handlePlay = () => {
     prePlayPosRef.current = currentTimeRef.current;
@@ -366,7 +385,11 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
               onPointerDown={e => startResize(e, 'tracklist')}
               title="Drag to resize track list"
             />
-            <ArrangeWindow onSeek={handleSeek} />
+            <ArrangeWindow
+              ref={arrangeRef}
+              onSeek={handleSeek}
+              onViewChange={handleViewChange}
+            />
           </div>
           {showMixer && (
             <>
