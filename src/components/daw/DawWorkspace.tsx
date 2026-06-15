@@ -40,7 +40,6 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   const [toast, setToast] = useState<{ msg: string; id: number } | null>(null);
   const [rcActive, setRcActive] = useState(false);
   const [rcViewOnly, setRcViewOnly] = useState(false);
-  const [remoteCursorPos, setRemoteCursorPos] = useState<{ nx: number; ny: number } | null>(null);
   const sendRcInputRef = useRef<((e: RemoteInputEvent) => void) | null>(null);
 
   const webAudio   = useAudioEngine();
@@ -103,7 +102,6 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
     setRcActive(active);
     setRcViewOnly(viewOnly);
     sendRcInputRef.current = sendFn;
-    if (!active) setRemoteCursorPos(null);
   }, []);
 
   // Always-current snapshot of panelSizes for use in closure callbacks
@@ -155,7 +153,6 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
 
   const handleInputEvent = useCallback((event: RemoteInputEvent) => {
     if (userRole !== 'artist') return;
-    if (event.type === 'pointermove') setRemoteCursorPos({ nx: event.nx, ny: event.ny });
     replayEvent(event);
   }, [userRole, replayEvent]);
 
@@ -409,7 +406,6 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
       {rcActive && userRole === 'artist' && (
         <RemoteControlOverlay
           userRole="artist"
-          remoteCursorPos={remoteCursorPos}
           onRevoke={() => setRcActive(false)}
           viewOnly={rcViewOnly}
         />

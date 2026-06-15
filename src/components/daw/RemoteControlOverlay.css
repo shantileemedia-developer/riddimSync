@@ -69,17 +69,3 @@
   color: rgba(255, 80, 80, 0.9);
 }
 
-/* ── Remote cursor dot (rendered on artist's screen) ─────────────────────── */
-.rc-remote-cursor {
-  position: fixed;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(0, 200, 255, 0.9);
-  border: 2px solid rgba(255, 255, 255, 0.85);
-  box-shadow: 0 0 6px rgba(0, 200, 255, 0.7);
-  pointer-events: none;
-  z-index: 99998;
-  transform: translate(-50%, -50%);
-  will-change: left, top;
-}

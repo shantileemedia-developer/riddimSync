@@ -8,12 +8,11 @@ interface Props {
   onSendInput?: (event: RemoteInputEvent) => void;
   onRevoke?: () => void;
   onExit?: () => void;
-  remoteCursorPos?: { nx: number; ny: number } | null;
   viewOnly?: boolean;
 }
 
 const RemoteControlOverlay: React.FC<Props> = ({
-  userRole, onSendInput, onRevoke, onExit, remoteCursorPos, viewOnly,
+  userRole, onSendInput, onRevoke, onExit, viewOnly,
 }) => {
 
   // ── Engineer: forward all interactions to artist via window listeners ─────
@@ -111,32 +110,18 @@ const RemoteControlOverlay: React.FC<Props> = ({
     );
   }
 
-  // ── Artist view: badge + engineer cursor dot ──────────────────────────────
-  return (
-    <>
-      {createPortal(
-        <div className="rc-badge-wrap">
-          <div className={`rc-badge${viewOnly ? ' rc-badge-view' : ''}`}>
-            <span className="rc-badge-dot" />
-            <span className="rc-badge-label">
-              {viewOnly ? 'ENGINEER WATCHING' : 'REMOTE MODE'}
-            </span>
-            <button className="rc-badge-exit" onClick={onRevoke} title="Stop sharing (Esc)">✕</button>
-          </div>
-        </div>,
-        document.body,
-      )}
-      {remoteCursorPos && createPortal(
-        <div
-          className="rc-remote-cursor"
-          style={{
-            left: `${remoteCursorPos.nx * 100}%`,
-            top:  `${remoteCursorPos.ny * 100}%`,
-          }}
-        />,
-        document.body,
-      )}
-    </>
+  // ── Artist view: badge only ───────────────────────────────────────────────
+  return createPortal(
+    <div className="rc-badge-wrap">
+      <div className={`rc-badge${viewOnly ? ' rc-badge-view' : ''}`}>
+        <span className="rc-badge-dot" />
+        <span className="rc-badge-label">
+          {viewOnly ? 'ENGINEER WATCHING' : 'REMOTE MODE'}
+        </span>
+        <button className="rc-badge-exit" onClick={onRevoke} title="Stop sharing (Esc)">✕</button>
+      </div>
+    </div>,
+    document.body,
   );
 };
 
