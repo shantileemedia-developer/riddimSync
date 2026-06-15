@@ -86,12 +86,6 @@ const panLcdRight = (pan: number): string => {
 /* ── Single-column VU meter ──────────────────────────────────────────────────── */
 const METER_FLOOR = -90;
 
-const dbToYMeter = (db: number, h: number): number => {
-  // Non-linear scale: top 50% = 0 to -18 dBFS, bottom 50% = -18 to floor
-  if (db >= 0)    return 0;
-  if (db >= -18)  return h * 0.5 * (db / -18);
-  return h * 0.5 + h * 0.5 * ((db + 18) / (METER_FLOOR + 18));
-};
 
 const meterColor = (db: number): string => {
   if (db >= -3)  return '#ff2200';
