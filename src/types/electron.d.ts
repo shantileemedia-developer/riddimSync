@@ -12,31 +12,31 @@ declare global {
       close:    () => Promise<void>;
     };
     studioRC: {
-      /**
-       * Inject an OS-level mouse or keyboard event via @nut-tree-fork/nut-js.
-       * Only available in Electron. Injected at real screen coordinates.
-       */
+      /** Inject an OS-level mouse/keyboard event via nut-js at real screen coordinates. */
       injectInput: (event: OsInputEvent) => Promise<void>;
 
-      /**
-       * Get the primary display's pixel dimensions so we can map
-       * normalized (0-1) coordinates → real screen pixels.
-       */
-      /** x, y are the display's virtual-screen offsets (non-zero on multi-monitor
-       *  setups where the primary display is not the leftmost one). */
+      /** Primary display logical bounds; x/y are virtual-screen offsets on multi-monitor setups. */
       getScreenSize: () => Promise<{ x: number; y: number; width: number; height: number }>;
 
-      /**
-       * Get available desktop capture sources via Electron's desktopCapturer.
-       * thumbnailSize lets the renderer filter out combined virtual-desktop
-       * sources (those are wider than a single monitor aspect ratio).
-       */
+      /** Desktop capture sources with thumbnailSize for aspect-ratio filtering. */
       getScreenSources: () => Promise<Array<{
         id: string;
         name: string;
         thumbnailDataUrl: string;
         thumbnailSize: { width: number; height: number };
       }>>;
+
+      /**
+       * Open a native audio-file picker from the main process.
+       * Does NOT interrupt the renderer's screen-capture tracks.
+       */
+      openAudioDialog: () => Promise<{ canceled: boolean; filePaths: string[] }>;
+
+      /**
+       * Read a local file as Uint8Array.
+       * Used with openAudioDialog() to load the chosen file content.
+       */
+      readFile: (filePath: string) => Promise<Uint8Array>;
     };
   }
 

@@ -1006,6 +1006,64 @@
   background: rgba(255, 68, 68, 1);
 }
 
+.desktop-control-stop-btn {
+  pointer-events: all;
+  background: rgba(60, 60, 60, 0.85);
+  color: #ccc;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer !important;
+  transition: background 0.15s;
+}
+
+.desktop-control-stop-btn:hover {
+  background: rgba(80, 80, 80, 1);
+  color: #fff;
+}
+
+/* ── Desktop Control in-widget preview ─────────────────────────────── */
+.desktop-stream-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+  flex-shrink: 0;
+}
+
+.desktop-stream-preview-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.desktop-stream-fullscreen-btn {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(30, 30, 30, 0.85);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  backdrop-filter: blur(4px);
+}
+
+.desktop-stream-fullscreen-btn:hover {
+  background: rgba(80, 120, 200, 0.9);
+  border-color: rgba(80, 120, 200, 0.6);
+}
+
 /* ── Desktop Control screen stream (legacy, kept for reference) ───── */
 .desktop-stream-container {
   position: relative;

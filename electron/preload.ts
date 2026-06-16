@@ -84,24 +84,32 @@ contextBridge.exposeInMainWorld('studioEmail', {
 
 // ── StudioRC Bridge — OS-level remote control ────────────────────────────────
 contextBridge.exposeInMainWorld('studioRC', {
-  /**
-   * Inject an OS-level mouse/keyboard event via @nut-tree-fork/nut-js.
-   * Coordinates are already in absolute screen pixels.
-   */
+  /** Inject an OS-level mouse/keyboard event via @nut-tree-fork/nut-js. */
   injectInput: (event: unknown): Promise<void> =>
     ipcRenderer.invoke('rc:inject-input', event),
 
-  /**
-   * Get the primary display's size so the renderer can map
-   * normalized (0–1) coords → real screen pixels.
-   */
-  getScreenSize: (): Promise<{ width: number; height: number }> =>
+  /** Primary display logical bounds (x/y are virtual-screen offsets on multi-monitor). */
+  getScreenSize: (): Promise<{ x: number; y: number; width: number; height: number }> =>
     ipcRenderer.invoke('rc:get-screen-size'),
 
-  /**
-   * Get desktop/window capture sources from desktopCapturer.
-   * Used by artist to pick which screen to share (full desktop by default).
-   */
-  getScreenSources: (): Promise<Array<{ id: string; name: string; thumbnailDataUrl: string }>> =>
+  /** Desktop capture sources — includes thumbnailSize for aspect-ratio filtering. */
+  getScreenSources: (): Promise<Array<{
+    id: string; name: string; thumbnailDataUrl: string;
+    thumbnailSize: { width: number; height: number };
+  }>> =>
     ipcRenderer.invoke('rc:get-sources'),
+
+  /**
+   * Open a native audio-file picker via the main process.
+   * Avoids interrupting the renderer (which would end active screen-capture tracks).
+   */
+  openAudioDialog: (): Promise<{ canceled: boolean; filePaths: string[] }> =>
+    ipcRenderer.invoke('dialog:open-audio'),
+
+  /**
+   * Read a local file as a Uint8Array.
+   * Used after openAudioDialog() to load the chosen audio file without another dialog.
+   */
+  readFile: (filePath: string): Promise<Uint8Array> =>
+    ipcRenderer.invoke('fs:read-file'),
 });

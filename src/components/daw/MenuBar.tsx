@@ -207,66 +207,80 @@ const MenuBar: React.FC<MenuBarProps> = ({
     toast('New project created.');
   }, [dispatch, setProjectDirHandle, setAudioDirHandle, toast]);
 
-  const handleImportAudio = useCallback(() => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'audio/*';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const url = URL.createObjectURL(file);
-      try {
-        const actx = new AudioContext();
-        const buf = await actx.decodeAudioData(await file.arrayBuffer());
-        const duration = buf.duration;
-        const { left: peaks, right: rawPeaksR } = await generatePeaksStereo(buf);
-        await actx.close();
-        const poolItemId = `pool_${Date.now()}`;
-        const poolItem: PoolItem = {
-          id: poolItemId,
-          name: file.name.replace(/\.[^.]+$/, ''),
-          audioUrl: url,
-          localFileName: file.name,
-          duration,
-          createdAt: new Date(),
-          waveformPeaks: peaks,
-          waveformPeaksR: rawPeaksR,
+  const handleImportAudio = useCallback(async () => {
+    let rawBuffer: ArrayBuffer;
+    let fileName: string;
+    if (window.studioRC?.openAudioDialog) {
+      const { canceled, filePaths } = await window.studioRC.openAudioDialog();
+      if (canceled || !filePaths[0]) return;
+      const bytes = await window.studioRC.readFile(filePaths[0]);
+      rawBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      fileName = filePaths[0].replace(/.*[\\/]/, '');
+    } else {
+      const result = await new Promise<{ buffer: ArrayBuffer; name: string } | null>(resolve => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'audio/*';
+        input.onchange = async () => {
+          const file = input.files?.[0];
+          resolve(file ? { buffer: await file.arrayBuffer(), name: file.name } : null);
         };
-        dispatch({ type: 'ADD_POOL_ITEM', payload: poolItem });
-        if (state.selectedTrackId) {
-          const track = state.tracks.find(t => t.id === state.selectedTrackId);
-          if (track) {
-            const peaksR = track.type === 'stereo' ? rawPeaksR : null;
-            dispatch({
-              type: 'ADD_REGION',
-              payload: {
-                id: `r_${Date.now()}`,
-                poolItemId,
-                trackId: track.id,
-                versionId: track.activeVersionId,
-                startTime: currentTimeRef.current,
-                duration,
-                name: poolItem.name,
-                audioUrl: url,
-                waveformPeaks: peaks,
-                waveformPeaksR: peaksR,
-                sourceDuration: duration,
-                sourcePeaks: peaks,
-                sourcePeaksR: rawPeaksR,
-              },
-            });
-          }
+        input.click();
+      });
+      if (!result) return;
+      rawBuffer = result.buffer;
+      fileName = result.name;
+    }
+
+    const url = URL.createObjectURL(new Blob([rawBuffer]));
+    try {
+      const actx = new AudioContext();
+      const buf = await actx.decodeAudioData(rawBuffer);
+      const duration = buf.duration;
+      const { left: peaks, right: rawPeaksR } = await generatePeaksStereo(buf);
+      await actx.close();
+      const poolItemId = `pool_${Date.now()}`;
+      const name = fileName.replace(/\.[^.]+$/, '');
+      const poolItem: PoolItem = {
+        id: poolItemId,
+        name,
+        audioUrl: url,
+        localFileName: fileName,
+        duration,
+        createdAt: new Date(),
+        waveformPeaks: peaks,
+        waveformPeaksR: rawPeaksR,
+      };
+      dispatch({ type: 'ADD_POOL_ITEM', payload: poolItem });
+      if (state.selectedTrackId) {
+        const track = state.tracks.find(t => t.id === state.selectedTrackId);
+        if (track) {
+          const peaksR = track.type === 'stereo' ? rawPeaksR : null;
+          dispatch({
+            type: 'ADD_REGION',
+            payload: {
+              id: `r_${Date.now()}`,
+              poolItemId,
+              trackId: track.id,
+              versionId: track.activeVersionId,
+              startTime: currentTimeRef.current,
+              duration,
+              name,
+              audioUrl: url,
+              waveformPeaks: peaks,
+              waveformPeaksR: peaksR,
+              sourceDuration: duration,
+              sourcePeaks: peaks,
+              sourcePeaksR: rawPeaksR,
+            },
+          });
         }
-        // Save as 24-bit WAV into the project's Audio/ folder
-        if (audioDirHandle) {
-          try {
-            await saveToAudioFolder(audioDirHandle, poolItem.name, buf);
-          } catch (err) { console.error('Audio folder save failed:', err); }
-        }
-        toast(`Imported: ${poolItem.name}`);
-      } catch { toast('Could not decode audio file.'); }
-    };
-    input.click();
+      }
+      if (audioDirHandle) {
+        try { await saveToAudioFolder(audioDirHandle, name, buf); } catch (err) { console.error('Audio folder save failed:', err); }
+      }
+      toast(`Imported: ${name}`);
+    } catch { toast('Could not decode audio file.'); }
   }, [dispatch, state.selectedTrackId, state.tracks, currentTimeRef, audioDirHandle, toast]);
 
   // ── Clipboard ────────────────────────────────────────────────────────

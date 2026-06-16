@@ -342,6 +342,24 @@ ipcMain.handle('rc:get-sources', async () => {
   }));
 });
 
+// ── File-picker & read via main process ──────────────────────────────────────
+// Opening a dialog from the renderer via <input type="file"> briefly steals focus
+// from the renderer window on Windows, which can terminate active MediaStream tracks
+// (screen capture).  Using dialog.showOpenDialog() from the main process avoids this.
+ipcMain.handle('dialog:open-audio', async () => {
+  return dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{
+      name: 'Audio Files',
+      extensions: ['wav', 'mp3', 'mp4', 'aiff', 'aif', 'aac', 'ogg', 'flac', 'm4a', 'opus', 'weba'],
+    }],
+  });
+});
+
+ipcMain.handle('fs:read-file', async (_e, filePath: string) => {
+  return fs.promises.readFile(filePath);
+});
+
 // ── Native Audio Engine ──────────────────────────────────────────────────────
 
 const engine = new NativeAudioEngine();

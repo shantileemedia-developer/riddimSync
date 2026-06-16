@@ -1311,59 +1311,80 @@ const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
   }, [dispatch, audioDirHandle]);
 
   // Right-click → mini toolbox
-  const handleImportAudio = useCallback(() => {
+  const handleImportAudio = useCallback(async () => {
     const track = tracks.find(t => t.id === selectedTrackId);
     if (!track) return;
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'audio/*';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const url = URL.createObjectURL(file);
-      try {
-        const actx = new AudioContext();
-        const buf = await actx.decodeAudioData(await file.arrayBuffer());
-        const { left: peaks, right: rawPeaksR } = await generatePeaksStereo(buf);
-        const peaksR = track.type === 'stereo' ? rawPeaksR : null;
-        const duration = buf.duration;
-        await actx.close();
-        const poolItemId = `pool_${Date.now()}`;
-        const poolItem: PoolItem = {
-          id: poolItemId,
-          name: file.name.replace(/\.[^.]+$/, ''),
-          audioUrl: url,
-          localFileName: file.name,
-          duration,
-          createdAt: new Date(),
-          waveformPeaks: peaks,
-          waveformPeaksR: rawPeaksR ?? undefined,
+
+    // Electron: use main-process dialog so the renderer is NOT interrupted.
+    // An <input type="file"> click in Electron briefly steals renderer focus on
+    // Windows, which can terminate active screen-capture MediaStream tracks.
+    let rawBuffer: ArrayBuffer;
+    let fileName: string;
+    if (window.studioRC?.openAudioDialog) {
+      const { canceled, filePaths } = await window.studioRC.openAudioDialog();
+      if (canceled || !filePaths[0]) return;
+      const bytes = await window.studioRC.readFile(filePaths[0]);
+      rawBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      fileName = filePaths[0].replace(/.*[\\/]/, '');
+    } else {
+      const result = await new Promise<{ buffer: ArrayBuffer; name: string } | null>(resolve => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'audio/*';
+        input.onchange = async () => {
+          const file = input.files?.[0];
+          resolve(file ? { buffer: await file.arrayBuffer(), name: file.name } : null);
         };
-        dispatch({ type: 'ADD_POOL_ITEM', payload: poolItem });
-        dispatch({
-          type: 'ADD_REGION',
-          payload: {
-            id: `r_${Date.now()}`,
-            poolItemId,
-            trackId: track.id,
-            versionId: track.activeVersionId,
-            startTime: currentTimeRef.current,
-            duration,
-            name: poolItem.name,
-            audioUrl: url,
-            waveformPeaks: peaks,
-            waveformPeaksR: peaksR ?? undefined,
-            sourceDuration: duration,
-            sourcePeaks: peaks,
-            sourcePeaksR: rawPeaksR ?? undefined,
-          },
-        });
-        if (audioDirHandle) {
-          try { await saveToAudioFolder(audioDirHandle, poolItem.name, buf); } catch {}
-        }
-      } catch { /* decode failed */ }
-    };
-    input.click();
+        input.click();
+      });
+      if (!result) return;
+      rawBuffer = result.buffer;
+      fileName = result.name;
+    }
+
+    const url = URL.createObjectURL(new Blob([rawBuffer]));
+    try {
+      const actx = new AudioContext();
+      const buf = await actx.decodeAudioData(rawBuffer);
+      const { left: peaks, right: rawPeaksR } = await generatePeaksStereo(buf);
+      const peaksR = track.type === 'stereo' ? rawPeaksR : null;
+      const duration = buf.duration;
+      await actx.close();
+      const poolItemId = `pool_${Date.now()}`;
+      const name = fileName.replace(/\.[^.]+$/, '');
+      const poolItem: PoolItem = {
+        id: poolItemId,
+        name,
+        audioUrl: url,
+        localFileName: fileName,
+        duration,
+        createdAt: new Date(),
+        waveformPeaks: peaks,
+        waveformPeaksR: rawPeaksR ?? undefined,
+      };
+      dispatch({ type: 'ADD_POOL_ITEM', payload: poolItem });
+      dispatch({
+        type: 'ADD_REGION',
+        payload: {
+          id: `r_${Date.now()}`,
+          poolItemId,
+          trackId: track.id,
+          versionId: track.activeVersionId,
+          startTime: currentTimeRef.current,
+          duration,
+          name,
+          audioUrl: url,
+          waveformPeaks: peaks,
+          waveformPeaksR: peaksR ?? undefined,
+          sourceDuration: duration,
+          sourcePeaks: peaks,
+          sourcePeaksR: rawPeaksR ?? undefined,
+        },
+      });
+      if (audioDirHandle) {
+        try { await saveToAudioFolder(audioDirHandle, name, buf); } catch {}
+      }
+    } catch { /* decode failed */ }
   }, [tracks, selectedTrackId, dispatch, currentTimeRef, audioDirHandle]);
 
   const handleContextMenu = (e: React.MouseEvent) => {

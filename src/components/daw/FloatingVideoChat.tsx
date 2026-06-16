@@ -170,8 +170,9 @@ const VideoGrid: React.FC<VideoGridProps> = memo(({
 interface DesktopControlFullscreenProps {
   stream: MediaStream;
   onExit: () => void;
+  onStop: () => void;
 }
-const DesktopControlFullscreen: React.FC<DesktopControlFullscreenProps> = ({ stream, onExit }) => {
+const DesktopControlFullscreen: React.FC<DesktopControlFullscreenProps> = ({ stream, onExit, onStop }) => {
   const vidRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (vidRef.current) vidRef.current.srcObject = stream;
@@ -186,11 +187,33 @@ const DesktopControlFullscreen: React.FC<DesktopControlFullscreenProps> = ({ str
           Desktop Control Active
         </div>
         <button className="desktop-control-exit-btn" onClick={onExit}>
-          Exit Desktop Control
+          ⊠ Exit Fullscreen
+        </button>
+        <button className="desktop-control-stop-btn" onClick={onStop}>
+          Stop Control
         </button>
       </div>
     </div>,
     document.body,
+  );
+};
+
+interface DesktopStreamPreviewProps {
+  stream: MediaStream;
+  onFullscreen: () => void;
+}
+const DesktopStreamPreview: React.FC<DesktopStreamPreviewProps> = ({ stream, onFullscreen }) => {
+  const vidRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (vidRef.current) vidRef.current.srcObject = stream;
+  }, [stream]);
+  return (
+    <div className="desktop-stream-preview">
+      <video ref={vidRef} autoPlay playsInline muted className="desktop-stream-preview-video" />
+      <button className="desktop-stream-fullscreen-btn" onClick={onFullscreen} title="Full Screen">
+        ⛶ Full Screen
+      </button>
+    </div>
   );
 };
 
@@ -208,6 +231,7 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
   const [monitorVolume, setMonitorVolume] = useState(0.7);
   const [rcDenied, setRcDenied] = useState(false);
   const [rcAudioDeviceConsent, setRcAudioDeviceConsent] = useState(false);
+  const [desktopFullscreen, setDesktopFullscreen] = useState(false);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [showLocalCam, setShowLocalCam] = useState(true);
   const previewStreamRef = useRef<MediaStream | null>(null);
@@ -333,6 +357,9 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
   }, [messages, showChat]);
 
   useEffect(() => { if (!rcRequested) setRcDenied(false); }, [rcRequested]);
+
+  // Exit fullscreen when RC ends
+  useEffect(() => { if (!rcActive) setDesktopFullscreen(false); }, [rcActive]);
 
   useEffect(() => {
     onRcStateChange?.(rcActive, rcActive ? sendInputEvent : null, rcViewOnly);
@@ -571,11 +598,20 @@ const FloatingVideoChat: React.FC<FloatingVideoChatProps> = ({
           userRole={userRole}
         />
 
-        {/* Desktop Control full-screen overlay — rendered as a portal when active */}
-        {userRole === 'engineer' && rcActive && remoteDesktopStream && (
+        {/* Desktop Control — small in-widget preview with Full Screen button */}
+        {userRole === 'engineer' && rcActive && remoteDesktopStream && !desktopFullscreen && (
+          <DesktopStreamPreview
+            stream={remoteDesktopStream}
+            onFullscreen={() => setDesktopFullscreen(true)}
+          />
+        )}
+
+        {/* Desktop Control full-screen overlay — shown only when user explicitly enters fullscreen */}
+        {userRole === 'engineer' && rcActive && remoteDesktopStream && desktopFullscreen && (
           <DesktopControlFullscreen
             stream={remoteDesktopStream}
-            onExit={stopRemoteControl}
+            onExit={() => setDesktopFullscreen(false)}
+            onStop={stopRemoteControl}
           />
         )}
 
