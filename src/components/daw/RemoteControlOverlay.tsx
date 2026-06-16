@@ -29,13 +29,27 @@ const RemoteControlOverlay = forwardRef<RemoteControlOverlayHandle, Props>((
   useEffect(() => { onExitRef.current      = onExit;      }, [onExit]);
   useEffect(() => { onRevokeRef.current    = onRevoke;    }, [onRevoke]);
 
-  // Expose direct DOM cursor update — bypasses React state/re-render entirely
+  // Expose direct DOM cursor update — bypasses React state/re-render entirely.
+  // We convert normalized screen coordinates → viewport-relative CSS so the dot
+  // aligns with nut-js even when the artist's window is not flush with the
+  // top-left corner of the display (title bar, taskbar, or multi-monitor offset).
   useImperativeHandle(ref, () => ({
     moveCursor: (nx: number, ny: number) => {
       const el = cursorRef.current;
       if (!el) return;
-      el.style.left    = `${nx * 100}%`;
-      el.style.top     = `${ny * 100}%`;
+      // window.screen.width/height = logical dimensions of the display the window is on
+      // window.screenX/Y           = window's origin in screen coordinates
+      // outerHeight - innerHeight  = title bar + border chrome
+      const sw       = window.screen.width;
+      const sh       = window.screen.height;
+      const chromeH  = window.outerHeight - window.innerHeight;
+      const chromeW  = (window.outerWidth  - window.innerWidth) / 2; // symmetric side borders
+      const screenX  = nx * sw;
+      const screenY  = ny * sh;
+      const viewX    = screenX - window.screenX - chromeW;
+      const viewY    = screenY - window.screenY - chromeH;
+      el.style.left    = `${(viewX / window.innerWidth)  * 100}%`;
+      el.style.top     = `${(viewY / window.innerHeight) * 100}%`;
       el.style.display = 'block';
     },
   }));
@@ -49,6 +63,11 @@ const RemoteControlOverlay = forwardRef<RemoteControlOverlayHandle, Props>((
       ny: e.clientY / window.innerHeight,
     });
 
+    // Elements marked data-desktop-hud are UI controls (e.g. Exit button on the full-screen
+    // desktop overlay) — clicks on them must NOT be forwarded to the artist's machine.
+    const isOnHud = (e: Event) =>
+      !!(e.target as HTMLElement)?.closest('[data-desktop-hud]');
+
     // Cap pointermove sends to one per animation frame (~60fps)
     let pendingMove: RemoteInputEvent | null = null;
     let rafId: number | null = null;
@@ -58,25 +77,32 @@ const RemoteControlOverlay = forwardRef<RemoteControlOverlayHandle, Props>((
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (isOnHud(e)) return;
       const { nx, ny } = norm(e);
       pendingMove = { type: 'pointermove', nx, ny, button: e.button, buttons: e.buttons };
       if (!rafId) rafId = requestAnimationFrame(flushMove);
     };
     const onPointerDown = (e: PointerEvent) => {
+      if (isOnHud(e)) return;
       const { nx, ny } = norm(e);
       onSendInputRef.current?.({ type: 'pointerdown', nx, ny, button: e.button, buttons: e.buttons });
     };
     const onPointerUp = (e: PointerEvent) => {
+      if (isOnHud(e)) return;
       const { nx, ny } = norm(e);
       onSendInputRef.current?.({ type: 'pointerup', nx, ny, button: e.button, buttons: 0 });
     };
     const onDblClick = (e: MouseEvent) => {
+      if (isOnHud(e)) return;
       onSendInputRef.current?.({ type: 'dblclick', ...norm(e), button: e.button });
     };
     const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault(); // suppress engineer's own browser context menu
+      if (isOnHud(e)) return;
       onSendInputRef.current?.({ type: 'contextmenu', ...norm(e), button: e.button });
     };
     const onWheel = (e: WheelEvent) => {
+      if (isOnHud(e)) return;
       onSendInputRef.current?.({ type: 'wheel', ...norm(e), deltaX: e.deltaX, deltaY: e.deltaY });
     };
     const onKeyDown = (e: KeyboardEvent) => {

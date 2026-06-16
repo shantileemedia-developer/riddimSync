@@ -26,12 +26,25 @@ const SYNCABLE_ACTIONS = new Set([
   // and would flood the channel. Seek sync is handled separately if needed.
 ]);
 
-export const useDawSync = (roomCode: string) => {
+/**
+ * @param roomCode        Session room code for the Supabase channel.
+ * @param onTransportSync Called when SET_PLAYING arrives from the network AND the
+ *                        transport state actually changes.  Use this to drive the
+ *                        local audio engine so play/stop syncs across peers.
+ */
+export const useDawSync = (
+  roomCode: string,
+  onTransportSync?: (playing: boolean) => void,
+) => {
   const { state, originalDispatch, setDispatchMiddleware } = useDaw();
   const channelRef = useRef<any>(null);
   // Keep a live ref to state so presence-join handler can broadcast the current state
   const stateRef = useRef<DawState>(state);
   useEffect(() => { stateRef.current = state; }, [state]);
+
+  // Keep a live ref to the callback so the channel closure never stales.
+  const onTransportSyncRef = useRef(onTransportSync);
+  useEffect(() => { onTransportSyncRef.current = onTransportSync; }, [onTransportSync]);
 
   // ── DB load helper (called on mount and on peer-join) ─────────────
   const fetchAndApplyState = (isMountedRef: { current: boolean }) => {
@@ -88,7 +101,18 @@ export const useDawSync = (roomCode: string) => {
 
     // Incoming action from peer
     channel.on('broadcast', { event: 'action' }, ({ payload }) => {
-      originalDispatch(payload as DawAction);
+      const action = payload as DawAction;
+      // Capture transport state BEFORE the dispatch so we can detect a real transition.
+      // This prevents a feedback loop: if the remote engine calls play() and re-broadcasts
+      // SET_PLAYING, we receive it when we're already in that state and skip calling the engine.
+      const prevIsPlaying = stateRef.current.transport.isPlaying;
+      originalDispatch(action);
+      if (action.type === 'SET_PLAYING') {
+        const next = action.payload as boolean;
+        if (next !== prevIsPlaying) {
+          onTransportSyncRef.current?.(next);
+        }
+      }
     });
 
     // Peer sends us a full state-sync blob when they join and already have state

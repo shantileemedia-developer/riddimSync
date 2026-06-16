@@ -54,6 +54,13 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   const { play, pause, stop, record, seek } = nativeAudio.nativeAvailable ? nativeAudio : webAudio;
   const { state, dispatch, masterStreamRef, audioCtxRef, currentTimeRef } = useDaw();
 
+  // Stable ref to engine functions — declared early so transport-sync callbacks can use it
+  // without ordering issues. Updated whenever the engine functions change identity.
+  const actionsRef = useRef({ play, pause, stop, record, seek });
+  useEffect(() => {
+    actionsRef.current = { play, pause, stop, record, seek };
+  }, [play, pause, stop, record, seek]);
+
   // ── Live stream (ListenTo-style) ────────────────────────────
   const getMasterStream = useCallback(() => {
     // Initialise AudioContext on first call (must be inside a user-gesture callsite)
@@ -69,7 +76,18 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
 
   const liveAudioRef = useRef<HTMLAudioElement>(null);
 
-  useDawSync(roomCode);
+  // Transport sync callback: when SET_PLAYING arrives from the network (peer clicked play/stop),
+  // drive the LOCAL audio engine so both sides stay in sync without coordinate-based RC clicks.
+  // The `actionsRef` is stable so this callback never needs to be recreated.
+  const onTransportSync = useCallback((playing: boolean) => {
+    if (playing) {
+      actionsRef.current.play();
+    } else {
+      actionsRef.current.pause();
+    }
+  }, []);
+
+  useDawSync(roomCode, onTransportSync);
 
   // Keep OS window title in sync with project name
   useEffect(() => {
@@ -155,10 +173,6 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
 
   // Remembers where playback started so spacebar stop can return there (Cubase behaviour)
   const prePlayPosRef = useRef<number>(0);
-  const actionsRef = useRef({ play, pause, stop, record, seek });
-  useEffect(() => {
-    actionsRef.current = { play, pause, stop, record, seek };
-  }, [play, pause, stop, record, seek]);
 
   const handleSeek = useCallback((t: number) => {
     prePlayPosRef.current = t; // Stop returns to seeked position, not original play start
@@ -343,6 +357,12 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
       {userRole === 'engineer' && <audio ref={liveAudioRef} autoPlay style={{ display: 'none' }} />}
       <MenuBar
         onOpenAudioPrefs={() => setShowAudioPrefs(true)}
+        onLeaveSession={() => {
+          localStorage.removeItem('sl_room');
+          localStorage.removeItem('sl_showApp');
+          localStorage.removeItem('sl_role');
+          window.location.reload();
+        }}
         onCloseProject={async () => {
           await supabase.auth.signOut();
           localStorage.removeItem('sl_room');
@@ -368,7 +388,7 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
       <div className="daw-main-area">
         {showInspector && (
           <>
-            <InspectorPanel />
+            <InspectorPanel onClose={() => setShowInspector(false)} />
             <div
               className="panel-resize-handle panel-resize-h"
               onPointerDown={e => startResize(e, 'inspector')}
@@ -398,7 +418,7 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
                 onPointerDown={e => startResize(e, 'mixer')}
                 title="Drag to resize mixer"
               />
-              <MixerPanel />
+              <MixerPanel onClose={() => setShowMixer(false)} />
             </>
           )}
         </div>

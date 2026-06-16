@@ -7,9 +7,17 @@ const isElectron = typeof window !== 'undefined' && !!window.studioRC;
 
 export const useRemoteControlReplay = (isActive: boolean) => {
   const capturedElementRef = useRef<Element | null>(null);
-  const screenSizeRef      = useRef<{ width: number; height: number } | null>(null);
+  const screenSizeRef      = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  // Pre-fetch screen size once when RC activates (Electron only)
+  // Fetch screen size eagerly on mount so it's ready before the first RC event arrives.
+  // Also re-fetch whenever RC activates in case the display changed.
+  useEffect(() => {
+    if (!isElectron) return;
+    window.studioRC.getScreenSize()
+      .then(size => { screenSizeRef.current = size; })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!isActive || !isElectron) return;
     window.studioRC.getScreenSize()
@@ -48,10 +56,12 @@ export const useRemoteControlReplay = (isActive: boolean) => {
         return;
       }
 
-      // Pointer events — map normalized coords → real screen pixels
+      // Pointer events — map normalized coords → real screen pixels.
+      // Add the display's virtual-screen offset (x, y) so clicks land on the
+      // correct monitor when the primary display is not the leftmost one.
       const pe  = event as Extract<RemoteInputEvent, { nx: number }>;
-      const x   = Math.round(pe.nx * width);
-      const y   = Math.round(pe.ny * height);
+      const x   = Math.round(pe.nx * width  + (screenSizeRef.current?.x ?? 0));
+      const y   = Math.round(pe.ny * height + (screenSizeRef.current?.y ?? 0));
       const btn = 'button' in pe ? (pe.button === 2 ? 'right' : pe.button === 1 ? 'middle' : 'left') : 'left';
 
       switch (pe.type) {
@@ -153,6 +163,15 @@ export const useRemoteControlReplay = (isActive: boolean) => {
             bubbles: true, cancelable: true,
             clientX: cssX, clientY: cssY,
             button: a.button, buttons: a.buttons,
+          }));
+        }
+        // On pointerup, dispatch a click so React onClick handlers fire (play, stop, add track, etc.)
+        // The browser fires click automatically on real user input but NOT on programmatic dispatchEvent.
+        if (pe.type === 'pointerup') {
+          target.dispatchEvent(new MouseEvent('click', {
+            bubbles: true, cancelable: true,
+            clientX: cssX, clientY: cssY,
+            button: a.button,
           }));
         }
       }
