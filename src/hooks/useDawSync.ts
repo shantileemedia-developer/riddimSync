@@ -91,6 +91,11 @@ export const useDawSync = (
   const stateRef = useRef<DawState>(state);
   useEffect(() => { stateRef.current = state; }, [state]);
 
+  // Guard: once we've received a live state-sync from the peer, the stale DB read
+  // must not overwrite it. Without this, the DB fetch (1-2s latency) fires AFTER
+  // the peer's state-sync and clears all the clips the engineer just saw.
+  const receivedLiveSyncRef = useRef(false);
+
   const onTransportSyncRef = useRef(onTransportSync);
   useEffect(() => { onTransportSyncRef.current = onTransportSync; }, [onTransportSync]);
 
@@ -118,7 +123,7 @@ export const useDawSync = (
           console.error('Failed to load project from DB:', error);
           return;
         }
-        if (isMountedRef.current && data?.state) {
+        if (isMountedRef.current && data?.state && !receivedLiveSyncRef.current) {
           const parsed = data.state as Partial<DawState> & { tempo?: number };
           // Restore the full transport block, not just tempo.
           // Old code only extracted `parsed.tempo` which lost loopStart/End etc.
@@ -217,6 +222,7 @@ export const useDawSync = (
 
     // Peer sends us a full state-sync blob when they join and already have state
     channel.on('broadcast', { event: 'state-sync' }, ({ payload }) => {
+      receivedLiveSyncRef.current = true; // block any in-flight DB fetch from overwriting this
       if (payload.state) {
         const s = payload.state as Partial<DawState>;
         const poolItems = s.poolItems?.map((item: any) => ({
@@ -353,7 +359,7 @@ export const useDawSync = (
     }, 2000);
 
     return () => clearTimeout(timer);
-  }, [state.tracks, state.regions, state.poolItems, state.transport, roomCode]);
+  }, [state.projectName, state.tracks, state.regions, state.poolItems, state.transport, roomCode]);
 
   // Called by DawWorkspace when a peer joins so they receive the live in-memory state
   // immediately rather than waiting for the next DB poll (which can be up to 2s stale).

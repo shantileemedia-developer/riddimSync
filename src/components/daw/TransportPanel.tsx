@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Play, Square, Circle, SkipBack, SkipForward, Repeat,
-  Activity, LayoutPanelLeft, LayoutPanelTop, PanelRight, Radio, ChevronUp, ChevronDown,
+  Activity, LayoutPanelLeft, LayoutPanelTop, PanelRight, ChevronUp, ChevronDown,
 } from 'lucide-react';
 import { useDaw } from '../../context/DawContext';
 import './TransportPanel.css';
@@ -162,9 +162,7 @@ interface TransportPanelProps {
   onRecord: () => void;
   onStopRecording?: () => void;
   userRole?: 'artist' | 'engineer';
-  isStreaming?: boolean;
   isReceiving?: boolean;
-  onToggleStream?: () => void;
 }
 
 const formatTime = (s: number): string => {
@@ -185,7 +183,7 @@ const toBarsBeats = (seconds: number, tempo: number): string => {
 
 const TransportPanel: React.FC<TransportPanelProps> = ({
   toggleInspector, toggleMixer, toggleMediaPool, onPlay, onStop, onReturnToZero, onRecord, onStopRecording,
-  userRole, isStreaming = false, isReceiving = false, onToggleStream,
+  userRole, isReceiving = false,
 }) => {
   const { state, dispatch, currentTimeRef } = useDaw();
   const { isPlaying, isRecording, currentTime, tempo, timeSignature, isLooping } = state.transport;
@@ -348,24 +346,14 @@ const TransportPanel: React.FC<TransportPanelProps> = ({
       {/* Right group: video pill slot + stream indicator — pill is leftmost so it clips first */}
       <div className="transport-right-group">
         <div id="transport-chat-slot" />
-        <div className={`transport-section stream-section ${isStreaming ? 'streaming' : ''} ${isReceiving ? 'receiving' : ''}`}>
-          {userRole === 'artist' ? (
-            <button
-              className={`stream-btn ${isStreaming ? 'active' : ''}`}
-              onClick={onToggleStream}
-              title={isStreaming ? 'Stop streaming output' : 'Stream stereo output live'}
-            >
-              <Radio size={13} />
-              <span className="stream-label">{isStreaming ? 'LIVE' : 'STREAM'}</span>
-              {isStreaming && <span className="stream-live-dot" />}
-            </button>
-          ) : (
+        {userRole === 'engineer' && (
+          <div className={`transport-section stream-section ${isReceiving ? 'receiving' : ''}`}>
             <div className={`stream-rx-indicator ${isReceiving ? 'active' : ''}`}>
               <span className={`stream-live-dot ${isReceiving ? 'active' : ''}`} />
               <span className="stream-label">{isReceiving ? 'ARTIST LIVE' : 'NO STREAM'}</span>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

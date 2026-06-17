@@ -19,9 +19,13 @@ interface ArtistPresence {
 interface Client {
   id: string;
   name: string;
-  email: string;
-  phone: string;
+  sessionCode?: string;
   sessions: number;
+}
+
+interface SessionHistoryEntry {
+  code: string;
+  createdAt: string; // ISO date string
 }
 
 interface Props {
@@ -59,8 +63,12 @@ export default function EngineerConsole({ userId, isAdmin, onOpenAdmin }: Props)
     try { return JSON.parse(localStorage.getItem('sl_clients') ?? '[]'); }
     catch { return []; }
   });
+  const [sessionHistory, setSessionHistory]       = useState<SessionHistoryEntry[]>(() => {
+    try { return JSON.parse(localStorage.getItem('sl_session_history') ?? '[]'); }
+    catch { return []; }
+  });
   const [showAddClient, setShowAddClient] = useState(false);
-  const [newClient, setNewClient]         = useState({ name: '', email: '', phone: '' });
+  const [newClient, setNewClient]         = useState({ name: '', sessionCode: '' });
 
   const phaseRef          = useRef(phase);
   const controlChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -82,6 +90,13 @@ export default function EngineerConsole({ userId, isAdmin, onOpenAdmin }: Props)
     setArtist(null);
     setDawControlGranted(false);
     setActiveTab('sessions');
+
+    setSessionHistory(prev => {
+      const entry: SessionHistoryEntry = { code, createdAt: new Date().toISOString() };
+      const deduped = [entry, ...prev.filter(e => e.code !== code)].slice(0, 10);
+      localStorage.setItem('sl_session_history', JSON.stringify(deduped));
+      return deduped;
+    });
   }, []);
 
   const endSession = useCallback(() => {
@@ -95,9 +110,16 @@ export default function EngineerConsole({ userId, isAdmin, onOpenAdmin }: Props)
 
   const copyCode = useCallback(() => {
     if (!roomCode) return;
-    navigator.clipboard.writeText(roomCode).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const doWrite = (): Promise<void> => {
+      if (window.studioClipboard) {
+        window.studioClipboard.write(roomCode);
+        return Promise.resolve();
+      }
+      return navigator.clipboard.writeText(roomCode);
+    };
+    doWrite()
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })
+      .catch(() => {});
   }, [roomCode]);
 
   // ── Clients ───────────────────────────────────────────────────────────────
@@ -107,17 +129,29 @@ export default function EngineerConsole({ userId, isAdmin, onOpenAdmin }: Props)
     const client: Client = {
       id: crypto.randomUUID(),
       name: newClient.name.trim(),
-      email: newClient.email.trim(),
-      phone: newClient.phone.trim(),
+      sessionCode: newClient.sessionCode.trim().toUpperCase() || undefined,
       sessions: 0,
     };
     setClients(prev => [...prev, client]);
-    setNewClient({ name: '', email: '', phone: '' });
+    setNewClient({ name: '', sessionCode: '' });
     setShowAddClient(false);
   }, [newClient]);
 
   const removeClient = useCallback((id: string) => {
     setClients(prev => prev.filter(c => c.id !== id));
+  }, []);
+
+  const clearSessionHistory = useCallback(() => {
+    setSessionHistory([]);
+    localStorage.removeItem('sl_session_history');
+  }, []);
+
+  const deleteSessionHistoryEntry = useCallback((code: string) => {
+    setSessionHistory(prev => {
+      const updated = prev.filter(e => e.code !== code);
+      localStorage.setItem('sl_session_history', JSON.stringify(updated));
+      return updated;
+    });
   }, []);
 
   // ── Presence: detect artist ────────────────────────────────────────────────
@@ -253,6 +287,10 @@ export default function EngineerConsole({ userId, isAdmin, onOpenAdmin }: Props)
                 onJoinSession={() => {
                   if (joinInput.replace('-', '').length >= 6) startSession(joinInput.toUpperCase());
                 }}
+                sessionHistory={sessionHistory}
+                onReuseSession={startSession}
+                onClearHistory={clearSessionHistory}
+                onDeleteHistoryEntry={deleteSessionHistoryEntry}
               />
             )}
             {phase === 'waiting' && roomCode && (
@@ -281,7 +319,7 @@ export default function EngineerConsole({ userId, isAdmin, onOpenAdmin }: Props)
             showAdd={showAddClient}
             newClient={newClient}
             onShowAdd={() => setShowAddClient(true)}
-            onCancelAdd={() => { setShowAddClient(false); setNewClient({ name: '', email: '', phone: '' }); }}
+            onCancelAdd={() => { setShowAddClient(false); setNewClient({ name: '', sessionCode: '' }); }}
             onNewClientChange={setNewClient}
             onAddClient={addClient}
             onRemoveClient={removeClient}
@@ -362,11 +400,16 @@ function ConsoleNav({
 
 function Dashboard({
   joinInput, onJoinInputChange, onCreateSession, onJoinSession,
+  sessionHistory, onReuseSession, onClearHistory, onDeleteHistoryEntry,
 }: {
   joinInput: string;
   onJoinInputChange: (v: string) => void;
   onCreateSession: () => void;
   onJoinSession: () => void;
+  sessionHistory: SessionHistoryEntry[];
+  onReuseSession: (code: string) => void;
+  onClearHistory: () => void;
+  onDeleteHistoryEntry: (code: string) => void;
 }) {
   return (
     <div className="ec-dashboard">
@@ -409,6 +452,45 @@ function Dashboard({
           </div>
         </div>
       </div>
+
+      {sessionHistory.length > 0 && (
+        <div className="ec-history-section">
+          <div className="ec-history-header">
+            <h2 className="ec-history-title">Recent Sessions</h2>
+            <button
+              className="ec-btn ghost small danger"
+              onClick={onClearHistory}
+            >
+              Clear History
+            </button>
+          </div>
+          <div className="ec-history-list">
+            {sessionHistory.map(entry => (
+              <div key={entry.code} className="ec-history-row">
+                <span className="ec-history-code">{entry.code}</span>
+                <span className="ec-history-date">
+                  {new Date(entry.createdAt).toLocaleDateString(undefined, {
+                    month: 'short', day: 'numeric', year: 'numeric',
+                  })}
+                </span>
+                <button
+                  className="ec-btn ghost small ec-history-delete"
+                  onClick={() => onDeleteHistoryEntry(entry.code)}
+                  title="Remove"
+                >
+                  ×
+                </button>
+                <button
+                  className="ec-btn secondary small ec-history-reuse"
+                  onClick={() => onReuseSession(entry.code)}
+                >
+                  Reopen
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -532,10 +614,10 @@ function ClientsPanel({
 }: {
   clients: Client[];
   showAdd: boolean;
-  newClient: { name: string; email: string; phone: string };
+  newClient: { name: string; sessionCode: string };
   onShowAdd: () => void;
   onCancelAdd: () => void;
-  onNewClientChange: (c: { name: string; email: string; phone: string }) => void;
+  onNewClientChange: (c: { name: string; sessionCode: string }) => void;
   onAddClient: () => void;
   onRemoveClient: (id: string) => void;
 }) {
@@ -561,15 +643,11 @@ function ClientsPanel({
             />
             <input
               className="ec-form-input"
-              placeholder="Email"
-              value={newClient.email}
-              onChange={e => onNewClientChange({ ...newClient, email: e.target.value })}
-            />
-            <input
-              className="ec-form-input"
-              placeholder="Phone"
-              value={newClient.phone}
-              onChange={e => onNewClientChange({ ...newClient, phone: e.target.value })}
+              placeholder="Artist Session ID (e.g. XXXX-XXXX)"
+              value={newClient.sessionCode}
+              onChange={e => onNewClientChange({ ...newClient, sessionCode: e.target.value.toUpperCase() })}
+              onKeyDown={e => e.key === 'Enter' && onAddClient()}
+              maxLength={9}
             />
           </div>
           <div className="ec-form-actions">
@@ -585,7 +663,7 @@ function ClientsPanel({
         <div className="ec-empty-state">
           <div className="ec-empty-icon">👤</div>
           <h3 className="ec-empty-title">No clients yet</h3>
-          <p className="ec-empty-sub">Add your artists to keep track of sessions and contact info.</p>
+          <p className="ec-empty-sub">Add your artists to keep track of their sessions.</p>
         </div>
       )}
 
@@ -596,10 +674,11 @@ function ClientsPanel({
               <div className="ec-client-avatar">{client.name.charAt(0).toUpperCase()}</div>
               <div className="ec-client-info">
                 <strong className="ec-client-name">{client.name}</strong>
-                <div className="ec-client-details">
-                  {client.email && <span>{client.email}</span>}
-                  {client.phone && <span>{client.phone}</span>}
-                </div>
+                {client.sessionCode && (
+                  <div className="ec-client-details">
+                    <span className="ec-client-session-code">ID: {client.sessionCode}</span>
+                  </div>
+                )}
               </div>
               <div className="ec-client-sessions">
                 <span className="ec-session-count">{client.sessions}</span>

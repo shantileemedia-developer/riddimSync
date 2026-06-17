@@ -135,8 +135,8 @@ const SessionScreen: React.FC<SessionScreenProps> = ({
             className="session-input session-input-sm"
             value={joinCode}
             onChange={e => setJoinCode(e.target.value.toUpperCase())}
-            placeholder="Engineer's code"
-            maxLength={8}
+            placeholder="XXXX-XXXX"
+            maxLength={9}
           />
           <button
             className="session-btn ghost"
@@ -194,8 +194,8 @@ const SessionScreen: React.FC<SessionScreenProps> = ({
           className="session-input"
           value={joinCode}
           onChange={e => setJoinCode(e.target.value.toUpperCase())}
-          placeholder="XXXXXX"
-          maxLength={8}
+          placeholder="XXXX-XXXX"
+          maxLength={9}
         />
         <button
           className="session-btn ghost"

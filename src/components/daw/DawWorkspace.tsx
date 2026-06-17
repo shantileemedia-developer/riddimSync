@@ -32,12 +32,13 @@ interface DawWorkspaceProps {
   roomCode: string;
   isAdmin?: boolean;
   onOpenAdmin?: () => void;
+  onLeaveSession?: () => void;
   onArtistLeft?: () => void;
   onExitDawControl?: () => void;
   artistName?: string;
 }
 
-const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode, isAdmin, onOpenAdmin, onArtistLeft, onExitDawControl, artistName }) => {
+const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode, isAdmin, onOpenAdmin, onLeaveSession, onArtistLeft, onExitDawControl, artistName }) => {
   const [showPreferences, setShowPreferences] = useState(false);
   const [showAudioPrefs, setShowAudioPrefs] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
@@ -199,18 +200,24 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
     return () => { document.body.classList.remove('rc-artist-active'); };
   }, [rcActive, userRole]);
 
-  // Stream toggle — artist must have played once so AudioContext is alive
-  const handleToggleStream = useCallback(() => {
-    if (isStreaming) {
-      stopStream();
-    } else {
-      if (!audioCtxRef.current) {
-        alert('Press Play at least once to initialise the audio engine, then start streaming.');
-        return;
-      }
+  // Auto-start stream for artist as soon as the DAW loads.
+  // Native engine sets masterStreamRef on mount; web-audio fallback retries on first play.
+  useEffect(() => {
+    if (userRole !== 'artist') return;
+    startStream();
+    return () => { stopStream(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Retry for the web-audio fallback case where AudioContext isn't ready until first Play.
+  const streamStartedRef = useRef(false);
+  useEffect(() => {
+    if (userRole !== 'artist' || isStreaming || streamStartedRef.current) return;
+    if (state.transport.isPlaying) {
+      streamStartedRef.current = true;
       startStream();
     }
-  }, [isStreaming, startStream, stopStream, audioCtxRef]);
+  }, [userRole, isStreaming, state.transport.isPlaying, startStream]);
 
   // Called by FloatingVideoChat when the App RC WebRTC data channel opens or closes.
   const handleAppRcChange = useCallback((active: boolean, sendFn: ((e: RemoteInputEvent) => void) | null) => {
@@ -641,10 +648,14 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
           else setShowAudioPrefs(true);
         }}
         onLeaveSession={() => {
-          localStorage.removeItem('sl_room');
-          localStorage.removeItem('sl_showApp');
-          localStorage.removeItem('sl_role');
-          window.location.reload();
+          if (onLeaveSession) {
+            onLeaveSession();
+          } else {
+            localStorage.removeItem('sl_room');
+            localStorage.removeItem('sl_showApp');
+            localStorage.removeItem('sl_role');
+            window.location.reload();
+          }
         }}
         onCloseProject={async () => {
           await supabase.auth.signOut();
@@ -792,9 +803,7 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
         onRecord={handleRecord}
         onStopRecording={handleStopRecording}
         userRole={userRole}
-        isStreaming={isStreaming}
         isReceiving={isReceiving}
-        onToggleStream={handleToggleStream}
       />
 
       <FloatingVideoChat

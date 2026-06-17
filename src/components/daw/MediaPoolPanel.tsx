@@ -11,7 +11,6 @@ import WaveformDisplay from './WaveformDisplay';
 import { exportAudioBlob } from '../../utils/audioExporter';
 import './MediaPoolPanel.css';
 
-const WORKUPLOAD_URL = 'https://workupload.com/';
 
 const formatDuration = (secs: number): string => {
   if (!secs) return '—';
@@ -303,11 +302,9 @@ const MediaPoolPanel = ({ onClose }: { onClose?: () => void }) => {
       .then(r => r.blob())
       .then(blob => {
         saveAs(blob, item.isArchive ? `${item.name}.zip` : item.name);
-        window.open(WORKUPLOAD_URL, '_blank');
       });
   };
 
-  const openWorkUpload = () => window.open(WORKUPLOAD_URL, '_blank');
 
   const selectedCount = selectedIds.size;
   const totalCount    = poolItems.length;
@@ -425,7 +422,7 @@ const MediaPoolPanel = ({ onClose }: { onClose?: () => void }) => {
                     }}
                     onContextMenu={e => { e.preventDefault(); e.stopPropagation(); if (!item.isArchive) setCtxMenu({ id: item.id, x: e.clientX, y: e.clientY }); }}
                     title={item.isArchive
-                      ? 'Drag to WorkUpload button · Double-click to save ZIP'
+                      ? 'Drag to Send to Engineer button · Double-click to save ZIP'
                       : item.name}
                   >
                     <div className="col-name">
@@ -534,17 +531,16 @@ const MediaPoolPanel = ({ onClose }: { onClose?: () => void }) => {
         );
       })()}
 
-      {/* WorkUpload send button — also a drag-drop target for ZIP pool items */}
+      {/* Send to Engineer button — drag-drop target for ZIP pool items */}
       <button
         className={`workupload-btn ${workUploadOver ? 'workupload-drag-over' : ''}`}
-        onClick={openWorkUpload}
         onDragOver={handleWorkUploadDragOver}
         onDragLeave={() => setWorkUploadOver(false)}
         onDrop={handleWorkUploadDrop}
-        title="Drag a ZIP from pool here to save it and open WorkUpload"
+        title="Drag a ZIP from pool here to save it and send to engineer"
       >
         <Upload size={13} />
-        <span>{workUploadOver ? 'Drop to save + open WorkUpload' : 'Send via WorkUpload'}</span>
+        <span>{workUploadOver ? 'Drop to send to engineer' : 'Send to Engineer'}</span>
       </button>
     </div>
   );

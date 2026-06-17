@@ -1367,6 +1367,41 @@ const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
       await actx.close();
       const poolItemId = `pool_${Date.now()}`;
       const name = fileName.replace(/\.[^.]+$/, '');
+
+      // Pre-write a float32 stereo WAV so the native engine can play this import
+      // directly via OS path — same path as recorded audio, no per-play HTTP fetch.
+      let nativeLocalPath: string | undefined;
+      if (window.audioEngine?.writeTemp) {
+        try {
+          const frames = buf.length;
+          const sr = buf.sampleRate;
+          const L = buf.getChannelData(0);
+          const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+          const wav = new ArrayBuffer(44 + frames * 8);
+          const dv = new DataView(wav);
+          const ws = (off: number, str: string) =>
+            str.split('').forEach((c, i) => dv.setUint8(off + i, c.charCodeAt(0)));
+          ws(0, 'RIFF'); dv.setUint32(4, 36 + frames * 8, true);
+          ws(8, 'WAVE');
+          ws(12, 'fmt '); dv.setUint32(16, 16, true);
+          dv.setUint16(20, 3, true);           // IEEE float PCM
+          dv.setUint16(22, 2, true);           // stereo
+          dv.setUint32(24, sr, true);
+          dv.setUint32(28, sr * 8, true);      // byte rate (sr × 2ch × 4B)
+          dv.setUint16(32, 8, true);           // block align
+          dv.setUint16(34, 32, true);          // bits per sample
+          ws(36, 'data'); dv.setUint32(40, frames * 8, true);
+          const samples = new Float32Array(wav, 44);
+          for (let i = 0; i < frames; i++) {
+            samples[i * 2]     = L[i];
+            samples[i * 2 + 1] = R[i];
+          }
+          nativeLocalPath = await window.audioEngine.writeTemp(`import_${poolItemId}.wav`, wav);
+        } catch {
+          // non-fatal: resolveFilePath falls back to decoding from audioUrl
+        }
+      }
+
       const poolItem: PoolItem = {
         id: poolItemId,
         name,
@@ -1389,6 +1424,7 @@ const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
           duration,
           name,
           audioUrl: url,
+          localFilePath: nativeLocalPath,
           waveformPeaks: peaks,
           waveformPeaksR: peaksR ?? undefined,
           sourceDuration: duration,

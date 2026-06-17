@@ -79,20 +79,10 @@ const RemoteControlOverlay = forwardRef<RemoteControlOverlayHandle, Props>((
     const isOnHud = (e: Event) =>
       !!(e.target as HTMLElement)?.closest('[data-desktop-hud]');
 
-    // Cap pointermove sends to one per animation frame (~60fps)
-    let pendingMove: RemoteInputEvent | null = null;
-    let rafId: number | null = null;
-    const flushMove = () => {
-      if (pendingMove) { onSendInputRef.current?.(pendingMove); pendingMove = null; }
-      rafId = null;
-    };
-
     const onPointerMove = (e: PointerEvent) => {
       if (isOnHud(e)) return;
-      // Pointermove: no stopImmediatePropagation — hover effects on engineer's UI are fine
       const { nx, ny } = norm(e);
-      pendingMove = { type: 'pointermove', nx, ny, button: e.button, buttons: e.buttons };
-      if (!rafId) rafId = requestAnimationFrame(flushMove);
+      onSendInputRef.current?.({ type: 'pointermove', nx, ny, button: e.button, buttons: e.buttons });
     };
     const onPointerDown = (e: PointerEvent) => {
       if (isOnHud(e)) return;
@@ -163,7 +153,6 @@ const RemoteControlOverlay = forwardRef<RemoteControlOverlayHandle, Props>((
     if (onInputEvent) window.addEventListener('input', onInputEvent, true);
 
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
       window.removeEventListener('pointerdown',  onPointerDown, cap);
       window.removeEventListener('pointermove',  onPointerMove, cap);
       window.removeEventListener('pointerup',    onPointerUp,   cap);

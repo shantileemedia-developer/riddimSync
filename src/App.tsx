@@ -230,6 +230,10 @@ function App() {
           roomCode={roomCode}
           isAdmin={isAdmin}
           onOpenAdmin={() => setShowAdminPanel(true)}
+          onLeaveSession={() => {
+            localStorage.removeItem('sl_room');
+            setRoomCode(null);
+          }}
         />
         {showAdminPanel && (
           <Suspense fallback={null}>

@@ -110,6 +110,50 @@ const MenuBar: React.FC<MenuBarProps> = ({
   const clipboardRef = useRef<Region | null>(null);
 
   const { dispatch, state, setProjectDirHandle, setAudioDirHandle, projectDirHandle, audioDirHandle, currentTimeRef } = useDaw();
+
+  // Auto-restore the last saved project when the artist re-enters a session.
+  // Runs once on mount; only fires for the Electron native path (window.studioProject).
+  const autoLoadedRef = useRef(false);
+  useEffect(() => {
+    if (autoLoadedRef.current || isEngineer || !window.studioProject || !projectDirPath) return;
+    autoLoadedRef.current = true;
+    (async () => {
+      try {
+        const json = await window.studioProject!.load(projectDirPath);
+        const saved = JSON.parse(json);
+
+        // Restore local audio files (blob/file URLs were stripped on save).
+        if (window.studioRC?.readFile) {
+          try {
+            const audioDir = await window.studioProject!.setup(projectDirPath);
+            const sep = audioDir.includes('\\') ? '\\' : '/';
+            const urlMap: Record<string, string> = {};
+            for (const item of (saved.poolItems ?? []) as PoolItem[]) {
+              if (item.localFileName && !item.audioUrl) {
+                try {
+                  const bytes = await window.studioRC.readFile(audioDir + sep + item.localFileName);
+                  urlMap[item.id] = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer]));
+                } catch { /* file missing — keep blank URL */ }
+              }
+            }
+            if (Object.keys(urlMap).length > 0) {
+              saved.poolItems = (saved.poolItems as PoolItem[]).map((p: PoolItem) =>
+                urlMap[p.id] ? { ...p, audioUrl: urlMap[p.id] } : p
+              );
+              saved.regions = (saved.regions as Region[]).map((r: Region) => {
+                const src = (saved.poolItems as PoolItem[]).find((p: PoolItem) => p.id === r.poolItemId);
+                return src && urlMap[src.id] ? { ...r, audioUrl: urlMap[src.id] } : r;
+              });
+            }
+          } catch { /* audio restore failed — continue with saved URLs */ }
+        }
+
+        dispatch({ type: 'SET_STATE', payload: saved });
+        toast(`Project restored: ${saved.projectName ?? projectDirPath.replace(/.*[\\/]/, '')}`);
+      } catch { /* no saved project — start fresh */ }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const projectName = state.projectName ?? 'Untitled Project';
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(projectName);
@@ -211,6 +255,59 @@ const MenuBar: React.FC<MenuBarProps> = ({
   }, [handleSaveAs, state, serializeForSave, dispatch, addToRecent, toast]);
 
   const handleOpenProject = useCallback(async () => {
+    // Electron native path
+    if (window.studioProject) {
+      try {
+        const { canceled, filePaths } = await window.studioProject.openFolderDialog();
+        if (canceled || !filePaths[0]) return;
+        const dir = filePaths[0];
+
+        let json: string;
+        try {
+          json = await window.studioProject.load(dir);
+        } catch {
+          toast('No saved project found in that folder.');
+          return;
+        }
+        const saved = JSON.parse(json);
+        const audioDir = await window.studioProject.setup(dir);
+
+        // Restore local audio files (blob URLs were stripped on save)
+        if (window.studioRC?.readFile) {
+          const sep = audioDir.includes('\\') ? '\\' : '/';
+          const urlMap: Record<string, string> = {};
+          for (const item of (saved.poolItems ?? []) as PoolItem[]) {
+            if (item.localFileName && !item.audioUrl) {
+              try {
+                const bytes = await window.studioRC.readFile(audioDir + sep + item.localFileName);
+                urlMap[item.id] = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer]));
+              } catch { /* file missing */ }
+            }
+          }
+          if (Object.keys(urlMap).length > 0) {
+            saved.poolItems = (saved.poolItems as PoolItem[]).map((p: PoolItem) =>
+              urlMap[p.id] ? { ...p, audioUrl: urlMap[p.id] } : p
+            );
+            saved.regions = (saved.regions as Region[]).map((r: Region) => {
+              const src = (saved.poolItems as PoolItem[]).find((p: PoolItem) => p.id === r.poolItemId);
+              return src && urlMap[src.id] ? { ...r, audioUrl: urlMap[src.id] } : r;
+            });
+          }
+        }
+
+        setProjectDirPath(dir);
+        localStorage.setItem('sd_projectDirPath', dir);
+        dispatch({ type: 'SET_STATE', payload: saved });
+        const name = saved.projectName ?? dir.replace(/.*[\\/]/, '');
+        addToRecent(name);
+        toast(`Opened: ${name}`);
+      } catch (err: any) {
+        if (err?.message !== 'canceled') toast('Could not open project.');
+      }
+      return;
+    }
+
+    // Web FS API fallback (browser)
     if (!('showDirectoryPicker' in window)) {
       alert('Opening projects from disk is only supported in Chrome or Edge.');
       return;
@@ -226,7 +323,6 @@ const MenuBar: React.FC<MenuBarProps> = ({
       const adh = await dh.getDirectoryHandle('Audio', { create: true });
       setAudioDirHandle(adh);
 
-      // Restore blob URLs from local Audio/ folder for pool items and regions
       const urlMap: Record<string, string> = {};
       for (const item of (saved.poolItems ?? []) as any[]) {
         if (item.localFileName) {
@@ -235,28 +331,26 @@ const MenuBar: React.FC<MenuBarProps> = ({
             const itemFh = await adh.getFileHandle(item.localFileName);
             const itemFile = await itemFh.getFile();
             urlMap[item.id] = URL.createObjectURL(itemFile);
-          } catch { /* file missing — keep whatever URL was saved */ }
+          } catch { /* file missing */ }
         }
       }
-
       if (Object.keys(urlMap).length > 0) {
         saved.poolItems = (saved.poolItems ?? []).map((p: any) =>
           urlMap[p.id] ? { ...p, audioUrl: urlMap[p.id] } : p
         );
-        // Match regions to pool items by name to update their audioUrl too
         const poolByName: Record<string, string> = {};
         for (const p of saved.poolItems) if (urlMap[p.id]) poolByName[p.name] = urlMap[p.id];
         saved.regions = (saved.regions ?? []).map((r: any) =>
           poolByName[r.name] ? { ...r, audioUrl: poolByName[r.name] } : r
         );
       }
-
       dispatch({ type: 'SET_STATE', payload: saved });
+      addToRecent(dh.name);
       toast(`Opened: ${dh.name}`);
     } catch (err: any) {
       if (err.name !== 'AbortError') toast('No project.json found in that folder.');
     }
-  }, [dispatch, setProjectDirHandle, setAudioDirHandle, toast]);
+  }, [dispatch, setProjectDirHandle, setAudioDirHandle, setProjectDirPath, addToRecent, toast]);
 
   const handleNewProject = useCallback(() => {
     if (!confirm('Start a new project? Unsaved changes will be lost.')) return;

@@ -26,6 +26,49 @@ const eng = () => window.audioEngine;
 const CLICK_LOOKAHEAD_S  = 0.12;
 const CLICK_INTERVAL_MS  = 25;
 
+// Decode any browser-supported audio format and re-encode as IEEE float 32-bit
+// stereo WAV so the native engine's WAV-only decoder can play it.
+async function decodeToWavBuffer(ab: ArrayBuffer): Promise<ArrayBuffer> {
+  const tmp = new AudioContext();
+  let decoded: AudioBuffer;
+  try {
+    decoded = await tmp.decodeAudioData(ab.slice(0)); // slice so detach doesn't affect original
+  } catch {
+    await tmp.close().catch(() => {});
+    return ab; // return original if we can't decode (will fail gracefully in native engine)
+  }
+  await tmp.close().catch(() => {});
+
+  const sr     = decoded.sampleRate;
+  const frames = decoded.length;
+  const L      = decoded.getChannelData(0);
+  const R      = decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : L;
+
+  // IEEE float 32-bit stereo WAV header
+  const wav = new ArrayBuffer(44 + frames * 8);
+  const dv  = new DataView(wav);
+  const ws  = (off: number, str: string) =>
+    str.split('').forEach((c, i) => dv.setUint8(off + i, c.charCodeAt(0)));
+
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + frames * 8, true);
+  ws(8, 'WAVE');
+  ws(12, 'fmt '); dv.setUint32(16, 16, true);
+  dv.setUint16(20, 3, true);           // IEEE float
+  dv.setUint16(22, 2, true);           // stereo
+  dv.setUint32(24, sr, true);
+  dv.setUint32(28, sr * 8, true);      // byte rate (sr × 2ch × 4B)
+  dv.setUint16(32, 8, true);           // block align (2ch × 4B)
+  dv.setUint16(34, 32, true);          // bits per sample
+  ws(36, 'data'); dv.setUint32(40, frames * 8, true);
+
+  const f32 = new Float32Array(wav, 44);
+  for (let i = 0; i < frames; i++) {
+    f32[i * 2]     = L[i];
+    f32[i * 2 + 1] = R[i];
+  }
+  return wav;
+}
+
 // ── Hook ───────────────────────────────────────────────────────────────────────
 
 export const useNativeAudioEngine = () => {
@@ -37,6 +80,7 @@ export const useNativeAudioEngine = () => {
     masterStreamRef,
     recordingStartTimeRef,
     nativeMasterLevelsRef,
+    userRole,
   } = useDaw();
 
   // ── Availability ────────────────────────────────────────────────────────────
@@ -95,19 +139,24 @@ export const useNativeAudioEngine = () => {
 
   const resolveFilePath = useCallback(async (url: string): Promise<string | null> => {
     if (!url) return null;
-    // Already an OS path (native recordings)
-    if (!url.startsWith('blob:') && !url.startsWith('http')) return url;
+    // Bare OS path (native WAV recordings) — pass directly to the engine
+    if (!url.startsWith('blob:') && !url.startsWith('http') && !url.startsWith('file:')) {
+      return url;
+    }
     const cached = tempCacheRef.current.get(url);
     if (cached) return cached;
     if (!eng()) return null;
     try {
-      const resp = await fetch(url);
-      const ab   = await resp.arrayBuffer();
-      // Use a stable name derived from the URL
-      const name = `audio_${Math.abs(url.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0))}.wav`;
-      const path = await eng()!.writeTemp(name, ab);
-      tempCacheRef.current.set(url, path);
-      return path;
+      const resp  = await fetch(url);
+      const ab    = await resp.arrayBuffer();
+      // Convert any format (MP3, AAC, OGG, WAV…) to IEEE float WAV so the
+      // native engine's WAV-only decoder can always play it.
+      const wavAb = await decodeToWavBuffer(ab);
+      const hash  = url.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
+      const name  = `audio_${Math.abs(hash)}.wav`;
+      const filePath = await eng()!.writeTemp(name, wavAb);
+      tempCacheRef.current.set(url, filePath);
+      return filePath;
     } catch {
       return null;
     }
@@ -165,11 +214,13 @@ export const useNativeAudioEngine = () => {
   const getAudioCtx = useCallback((): AudioContext => {
     if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
       audioCtxRef.current = new AudioContext({ sampleRate: 48000 });
-      masterStreamRef.current = audioCtxRef.current.createMediaStreamDestination();
+      if (userRole === 'artist') {
+        masterStreamRef.current = audioCtxRef.current.createMediaStreamDestination();
+      }
       playbackBusNextTimeRef.current = audioCtxRef.current.currentTime + 0.06;
     }
     return audioCtxRef.current;
-  }, [audioCtxRef, masterStreamRef]);
+  }, [audioCtxRef, masterStreamRef, userRole]);
 
   const scheduleClick = useCallback((ctx: AudioContext, time: number, accent: boolean) => {
     const DUR = 0.022;
@@ -241,24 +292,29 @@ export const useNativeAudioEngine = () => {
     startMetronome(ctx, currentTimeRef.current);
   }, [state.transport.tempo, state.transport.timeSignature]); // eslint-disable-line
 
-  // ── Playback-mix bus → masterStreamRef (DAW monitoring stream) ─────────────
-  // Subscribe to the native engine's rendered output bus and pipe PCM chunks
-  // into the Web Audio master stream destination so useAudioStream can offer
-  // the playback audio to the engineer via WebRTC.
+  // ── Bus → masterStreamRef (DAW monitoring stream) ──────────────────────────
+  // Pipe both 'playback-mix' (DAW track output) and 'mic-input' (live input
+  // monitoring) into the Web Audio master stream destination so the engineer
+  // hears both playback and the artist's live input via the monitoring WebRTC track.
   useEffect(() => {
-    if (!eng()) return;
+    if (!eng() || userRole !== 'artist') return;
 
     // Eagerly init AudioContext so masterStreamRef.current is ready before the
     // first getDawStream() call (which happens when the video call starts).
     getAudioCtx();
 
     window.audioEngine!.subscribeBus('playback-mix').catch(() => {});
+    window.audioEngine!.subscribeBus('mic-input').catch(() => {});
 
     const INIT_LATENCY_S = 0.06;
     const JITTER_PAD_S   = 0.04;
+    let   micNextTime    = 0; // separate scheduling timeline for mic-input
 
     const off = window.audioEngine!.onBusChunk((busId, data) => {
-      if (busId !== 'playback-mix') return;
+      const isPlayback = busId === 'playback-mix';
+      const isMic      = busId === 'mic-input';
+      if (!isPlayback && !isMic) return;
+
       const ctx  = audioCtxRef.current;
       const dest = masterStreamRef.current;
       if (!ctx || ctx.state === 'closed' || !dest) return;
@@ -277,17 +333,27 @@ export const useNativeAudioEngine = () => {
       src.connect(dest);
 
       const now = ctx.currentTime;
-      // Reset scheduling when behind real-time (after silence gap between playback sessions).
-      if (playbackBusNextTimeRef.current < now + JITTER_PAD_S) {
-        playbackBusNextTimeRef.current = now + INIT_LATENCY_S;
+      if (isPlayback) {
+        if (playbackBusNextTimeRef.current < now + JITTER_PAD_S) {
+          playbackBusNextTimeRef.current = now + INIT_LATENCY_S;
+        }
+        src.start(playbackBusNextTimeRef.current);
+        playbackBusNextTimeRef.current += numFrames / ctx.sampleRate;
+      } else {
+        // mic-input uses its own scheduling timeline so it doesn't interfere
+        // with playback-mix scheduling during simultaneous record + overdub.
+        if (micNextTime < now + JITTER_PAD_S) {
+          micNextTime = now + INIT_LATENCY_S;
+        }
+        src.start(micNextTime);
+        micNextTime += numFrames / ctx.sampleRate;
       }
-      src.start(playbackBusNextTimeRef.current);
-      playbackBusNextTimeRef.current += numFrames / ctx.sampleRate;
     });
 
     return () => {
       off();
       window.audioEngine?.unsubscribeBus('playback-mix').catch(() => {});
+      window.audioEngine?.unsubscribeBus('mic-input').catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -445,9 +511,13 @@ export const useNativeAudioEngine = () => {
     punchWritingRef.current = false;
     startAnimLoop();
 
+    // Always ensure the Web Audio context is running so bus chunks can flow
+    // into masterStreamRef (the WebRTC monitoring stream). Without this, a
+    // suspended context silently drops all audio and the engineer hears nothing.
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') await ctx.resume();
+
     if (state.transport.metronomeOn) {
-      const ctx = getAudioCtx();
-      if (ctx.state === 'suspended') await ctx.resume();
       startMetronome(ctx, offset);
     }
 
@@ -605,11 +675,13 @@ export const useNativeAudioEngine = () => {
     const inId      = prefs.nativeInputDeviceId;
     const outId     = prefs.nativeOutputDeviceId;
 
+    // Ensure Web Audio context is running before count-in or metronome scheduling.
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') await ctx.resume();
+
     // Count-in before recording
     const countInBars = state.transport.countInBars;
     if (countInBars > 0) {
-      const ctx       = getAudioCtx();
-      if (ctx.state === 'suspended') await ctx.resume();
       const beatDur   = 60 / state.transport.tempo;
       for (let i = 0; i < countInBars * state.transport.timeSignature[0]; i++) {
         scheduleClick(ctx, ctx.currentTime + i * beatDur, i % state.transport.timeSignature[0] === 0);
@@ -626,8 +698,6 @@ export const useNativeAudioEngine = () => {
     startAnimLoop();
 
     if (state.transport.metronomeOn) {
-      const ctx = getAudioCtx();
-      if (ctx.state === 'suspended') await ctx.resume();
       startMetronome(ctx, currentTimeRef.current);
     }
 
@@ -638,11 +708,10 @@ export const useNativeAudioEngine = () => {
 
     await eng()!.startRecording(filePath, inId, outId, 48000, 2);
 
-    // Overdub: play existing regions alongside the new recording
+    // Always call play so the position clock runs and the live waveform draws,
+    // even on an empty timeline (specs can be [] for a first-take recording).
     const specs = await buildSpecs(currentTimeRef.current);
-    if (specs.length > 0) {
-      await eng()!.play(specs, currentTimeRef.current, outId !== -1 ? outId : undefined, 48000);
-    }
+    await eng()!.play(specs, currentTimeRef.current, outId !== -1 ? outId : undefined, 48000);
   }, [
     state.tracks, state.poolItems, state.transport,
     currentTimeRef, recordingStartTimeRef, livePeaksRef,

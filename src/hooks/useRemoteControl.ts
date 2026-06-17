@@ -10,12 +10,21 @@ export const useRemoteControlReplay = (
   mode: 'app' | 'desktop' = 'desktop',
   onInjectionError?: (err: unknown) => void,
 ) => {
-  const capturedElementRef  = useRef<Element | null>(null);
-  const screenSizeRef       = useRef<{ x: number; y: number; width: number; height: number; scaleFactor: number } | null>(null);
-  const hasDraggedRef       = useRef(false);
-  const prevHoverTargetRef  = useRef<Element | null>(null);
-  const onInjectionErrorRef = useRef(onInjectionError);
+  const capturedElementRef    = useRef<Element | null>(null);
+  const screenSizeRef         = useRef<{ x: number; y: number; width: number; height: number; scaleFactor: number } | null>(null);
+  const hasDraggedRef         = useRef(false);
+  const prevHoverTargetRef    = useRef<Element | null>(null);
+  const onInjectionErrorRef   = useRef(onInjectionError);
+  const pendingDesktopMoveRef = useRef<{ x: number; y: number } | null>(null);
+  const desktopMoveRafRef     = useRef<number | null>(null);
+
   useEffect(() => { onInjectionErrorRef.current = onInjectionError; }, [onInjectionError]);
+
+  useEffect(() => {
+    return () => {
+      if (desktopMoveRafRef.current !== null) cancelAnimationFrame(desktopMoveRafRef.current);
+    };
+  }, []);
 
   // Fetch screen size eagerly on mount so it's ready before the first RC event arrives.
   // Also re-fetch whenever RC activates in case the display changed.
@@ -93,7 +102,18 @@ export const useRemoteControlReplay = (
 
       switch (pe.type) {
         case 'pointermove':
-          inject({ type: 'mouse-move', x, y });
+          // Buffer the latest position and flush once per rAF frame — prevents
+          // queuing up hundreds of IPC calls when events arrive faster than nut-js
+          // can process them, which is what causes the cursor to fall behind.
+          pendingDesktopMoveRef.current = { x, y };
+          if (desktopMoveRafRef.current === null) {
+            desktopMoveRafRef.current = requestAnimationFrame(() => {
+              const pos = pendingDesktopMoveRef.current;
+              if (pos) inject({ type: 'mouse-move', x: pos.x, y: pos.y });
+              pendingDesktopMoveRef.current = null;
+              desktopMoveRafRef.current = null;
+            });
+          }
           break;
         case 'pointerdown':
           inject({ type: 'mouse-down', x, y, button: btn });
