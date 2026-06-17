@@ -5,7 +5,25 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  // Free public TURN servers via Open Relay (Metered) — handles symmetric NAT.
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turns:openrelay.metered.ca:443',
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ];
+
+if (import.meta.env.VITE_TURN_URL) {
+  ICE_SERVERS.push({
+    urls: import.meta.env.VITE_TURN_URL as string,
+    username: import.meta.env.VITE_TURN_USER as string | undefined,
+    credential: import.meta.env.VITE_TURN_CREDENTIAL as string | undefined,
+  });
+}
 
 const CHANNEL = (roomCode: string) => `studiolink_stream_${roomCode}`;
 
@@ -172,9 +190,10 @@ export const useAudioStream = ({
 
       pc.onconnectionstatechange = () => {
         const s = pc.connectionState;
-        if (s === 'connected')                          setConnectionState('connected');
-        else if (s === 'connecting' || s === 'new')    setConnectionState('connecting');
-        else if (s === 'disconnected' || s === 'failed') {
+        if (s === 'connected')                       setConnectionState('connected');
+        else if (s === 'connecting' || s === 'new')  setConnectionState('connecting');
+        else if (s === 'disconnected')               setConnectionState('connecting'); // transient, ICE may recover
+        else if (s === 'failed') {
           setConnectionState('failed');
           setIsReceiving(false);
         }
