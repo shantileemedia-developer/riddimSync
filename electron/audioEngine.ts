@@ -385,8 +385,9 @@ export class NativeAudioEngine extends EventEmitter {
       this.outStream = null;
     }
     // Re-pipe monitoring passthrough now that _fill() has stopped writing.
-    // (startPlayback unpiped it to prevent two concurrent writers to outStream.)
-    if (this.monitoring && this.inStream && this.outStream) {
+    // Skip when recording is active — startRecording already owns the pipe and
+    // calling pipe() again here would create a double-pipe during overdub.
+    if (this.monitoring && this.inStream && this.outStream && !this.recording) {
       this.inStream.pipe(this.outStream, { end: false });
     }
     this.liveParams.clear();
