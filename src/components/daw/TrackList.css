@@ -1,0 +1,426 @@
+﻿.track-list {
+  width: var(--tracklist-w, 210px);
+  min-width: 160px;
+  max-width: 320px;
+  background-color: #212225;
+  border-right: 1px solid #1a1b1e;
+  display: flex;
+  flex-direction: column;
+}
+
+/* â”€â”€ Ruler spacer â€” mirrors the two rulers in ArrangeWindow â”€â”€ */
+.track-ruler-spacer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Unified header â€” spans bar-ruler height (36px) + time-ruler height (22px) = 58px total.
+   Kept as one block so the time-ruler color doesn't bleed visually into the track strip. */
+.track-ruler-header {
+  height: 58px;
+  background-color: #2a2b2e;
+  border-bottom: 1px solid #1a1b1e;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 14px;
+  font-size: 10px;
+  color: #606266;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+
+/* Keep for any legacy references */
+.track-list-header {
+  height: 30px;
+  background-color: #2a2b2e;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 11px;
+  color: #808080;
+  font-weight: 600;
+  border-bottom: 1px solid #1a1b1e;
+}
+
+.settings-icon {
+  cursor: pointer;
+}
+.settings-icon:hover {
+  color: #a0a0a0;
+}
+
+.add-track-btn {
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+}
+.add-track-btn:hover {
+  background-color: rgba(0, 255, 204, 0.15);
+  color: #00ffcc;
+}
+
+.track-header.is-muted .track-name {
+  opacity: 0.4;
+}
+
+.btn-del { color: #555; }
+.btn-del:hover { background-color: rgba(255, 77, 77, 0.15); color: #ff4d4d; border-color: #ff4d4d; }
+
+/* Track type badge */
+.track-type-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 2px;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.track-type-badge.mono {
+  background-color: rgba(0, 255, 204, 0.12);
+  color: #00ffcc;
+  border: 1px solid rgba(0, 255, 204, 0.25);
+}
+.track-type-badge.stereo {
+  background-color: rgba(255, 184, 77, 0.12);
+  color: #ffb84d;
+  border: 1px solid rgba(255, 184, 77, 0.25);
+}
+
+/* Version button */
+.track-version-btn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background-color: #1a1b1e;
+  border: 1px solid #333;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-size: 10px;
+  color: #a0a0a0;
+  cursor: pointer;
+  margin-left: auto;
+  position: relative;
+}
+.track-version-btn:hover {
+  background-color: #2a2b2e;
+  color: #d1d1d1;
+  border-color: #00ffcc44;
+}
+
+/* Version dropdown */
+.version-dropdown {
+  position: absolute;
+  left: 6px;
+  top: calc(100% - 2px);
+  background-color: #252628;
+  border: 1px solid #3a3b3e;
+  border-radius: 4px;
+  z-index: 200;
+  min-width: 150px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+.version-dropdown-header {
+  padding: 6px 12px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #555;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  border-bottom: 1px solid #2e2f33;
+  margin-bottom: 2px;
+}
+
+.version-item {
+  padding: 7px 12px;
+  font-size: 12px;
+  color: #d1d1d1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.version-item:hover { background-color: #2a2b2e; }
+.version-item.active { color: #00ffcc; font-weight: 600; }
+.version-item.active .version-item-dot { background-color: #00ffcc; }
+
+.version-item-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #444;
+  flex-shrink: 0;
+}
+
+.version-rename-input {
+  background: #1a1b1e;
+  border: 1px solid #7c3aed;
+  border-radius: 3px;
+  color: #e2e8f0;
+  font-size: 12px;
+  padding: 1px 4px;
+  width: 100%;
+  outline: none;
+}
+
+.version-item.add-version {
+  color: #00ffcc;
+  border-top: 1px solid #3a3b3e;
+  font-size: 12px;
+  margin-top: 2px;
+  padding-top: 8px;
+}
+.version-item.add-version:hover { background-color: rgba(0,255,204,0.1); }
+
+/* Empty area fills remaining space */
+.track-list-empty {
+  flex: 1;
+  min-height: 60px;
+}
+
+/* â”€â”€ Drag handle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 100%;
+  color: #444;
+  cursor: grab;
+  flex-shrink: 0;
+}
+.drag-handle:hover {
+  color: #888;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* â”€â”€ Drag-and-drop states â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.track-header.dragging {
+  opacity: 0.35;
+  background-color: #1a1b1e;
+}
+
+.track-header.drop-above {
+  box-shadow: inset 0 2px 0 0 #00ffcc;
+}
+
+.track-header.drop-below {
+  box-shadow: inset 0 -2px 0 0 #00ffcc;
+}
+
+.track-list-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.track-header {
+  border-bottom: 1px solid #1a1b1e;
+  display: flex;
+  background-color: #212225;
+  cursor: pointer;
+  position: relative;
+}
+
+.track-header.selected {
+  background-color: #272829;
+}
+
+.track-color {
+  width: 6px;
+  height: 100%;
+}
+
+.track-header-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--track-pad, 7px 8px 6px);
+  min-width: 0;
+  position: relative;
+  overflow: visible;
+}
+
+.track-name-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.track-number {
+  font-size: 11px;
+  color: #666;
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.track-name {
+  font-size: var(--font-track, 13px);
+  font-weight: 500;
+  color: #d8d8d8;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.track-name-input {
+  font-size: 13px;
+  font-weight: 500;
+  color: #d1d1d1;
+  background-color: #1a1b1e;
+  border: 1px solid #00ffcc;
+  border-radius: 2px;
+  padding: 0 3px;
+  outline: none;
+  width: 100%;
+}
+
+.track-controls-row {
+  display: flex;
+  gap: 4px;
+}
+
+.track-btn {
+  width: var(--btn-w, 26px);
+  height: var(--btn-h, 22px);
+  border-radius: 2px;
+  border: 1px solid #333;
+  background-color: #1a1b1e;
+  color: #888;
+  font-size: var(--btn-font, 10px);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.track-btn:hover {
+  background-color: #2a2b2e;
+  color: #d1d1d1;
+  border-color: #555;
+}
+
+.btn-m:active, .btn-m.active { background-color: #ffb84d; color: #fff; border-color: #ffb84d; }
+.btn-s:active, .btn-s.active { background-color: #ff4d4d; color: #fff; border-color: #ff4d4d; }
+.btn-r:active, .btn-r.active { background-color: #ff4d4d; color: #fff; border-color: #ff4d4d; }
+.btn-mon:active, .btn-mon.active { background-color: #00cc66; color: #fff; border-color: #00cc66; }
+
+.track-version-dropdown {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: #1a1b1e;
+  border: 1px solid #333;
+  padding: 0 5px;
+  border-radius: 2px;
+  font-size: 10px;
+  color: #a0a0a0;
+  cursor: pointer;
+  margin-left: 4px;
+}
+.track-version-dropdown:hover {
+  background-color: #2a2b2e;
+  color: #d1d1d1;
+}
+
+.track-volume-row {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+}
+
+.track-fader-with-meter {
+  position: relative;
+  flex: 1;
+  height: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.track-volume-slider {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 10px;
+  -webkit-appearance: none;
+  background: transparent;
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.track-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 4px;
+  height: 12px;
+  background: #d1d1d1;
+  border-radius: 2px;
+  border: 1px solid #111;
+  cursor: pointer;
+  box-shadow: -1px 0 3px rgba(0,0,0,0.6), 1px 0 3px rgba(0,0,0,0.6);
+}
+
+.track-volume-slider::-moz-range-thumb {
+  width: 4px;
+  height: 12px;
+  background: #d1d1d1;
+  border-radius: 2px;
+  border: 1px solid #111;
+  cursor: pointer;
+  box-shadow: -1px 0 3px rgba(0,0,0,0.6), 1px 0 3px rgba(0,0,0,0.6);
+}
+
+.track-volume-slider::-webkit-slider-thumb:hover {
+  background: #fff;
+  box-shadow: 0 0 5px rgba(0, 255, 204, 0.6);
+}
+
+.track-volume-slider::-moz-range-thumb:hover {
+  background: #fff;
+  box-shadow: 0 0 5px rgba(0, 255, 204, 0.6);
+}
+
+.track-resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  cursor: row-resize;
+  z-index: 10;
+}
+.track-resize-handle:hover {
+  background-color: rgba(0, 255, 204, 0.3);
+}
+
+/* Track list width and track-btn sizes are driven by CSS variables set in DawWorkspace */
+
+/* -- Track mini meter canvas — overlaid behind the fader ------ */
+.track-mini-meter {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 100%;
+  height: 6px;
+  display: block;
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 0;
+}
+

@@ -1,0 +1,450 @@
+.daw-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  background-color: #1a1b1e;
+  color: #d1d1d1;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.daw-main-area {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.daw-arrange-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid #2a2b2e;
+}
+
+.daw-arrange-container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Base Panel Styles */
+.daw-panel {
+  background-color: #212225;
+  border: 1px solid #2a2b2e;
+}
+
+.daw-panel-header {
+  background: linear-gradient(to bottom, #303136, #2a2b2e);
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #a0a0a0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #1a1b1e;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Panel close button — appears in mixer and inspector headers */
+.panel-close-btn {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: color 0.1s, background 0.1s;
+  flex-shrink: 0;
+}
+.panel-close-btn:hover {
+  color: #fff;
+  background: rgba(255, 80, 80, 0.25);
+}
+
+/* Custom Scrollbars for DAW */
+.daw-workspace *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.daw-workspace *::-webkit-scrollbar-track {
+  background: #1a1b1e;
+}
+.daw-workspace *::-webkit-scrollbar-thumb {
+  background: #3a3b3e;
+  border: 2px solid #1a1b1e;
+  border-radius: 6px;
+}
+.daw-workspace *::-webkit-scrollbar-thumb:hover {
+  background: #505156;
+}
+
+/* Glassmorphism accents */
+.glass-panel {
+  background: rgba(33, 34, 37, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.daw-toast-notification {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 255, 204, 0.15);
+  border: 1px solid #00ffcc;
+  color: #00ffcc;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 1000;
+  animation: toastFadeInOut 3s forwards;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px);
+}
+
+@keyframes toastFadeInOut {
+  0% { opacity: 0; transform: translate(-50%, -10px); }
+  10% { opacity: 1; transform: translate(-50%, 0); }
+  90% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -10px); }
+}
+
+/* ── CSS Custom Properties — density + panel sizes ── */
+.daw-workspace {
+  /* Panel sizes — set via inline style from React; these are fallback defaults */
+  --inspector-w: 220px;
+  --tracklist-w: 210px;
+  --mixer-h: 320px;
+
+  /* UI density tokens — standard (default) */
+  --btn-h: 22px;
+  --btn-w: 26px;
+  --btn-font: 10px;
+  --font-track: 13px;
+  --font-label: 11px;
+  --track-pad: 7px 8px 6px;
+  --gap-sm: 4px;
+}
+
+.daw-workspace.density-compact {
+  --btn-h: 18px;
+  --btn-w: 22px;
+  --btn-font: 9px;
+  --font-track: 11px;
+  --font-label: 9px;
+  --track-pad: 4px 6px 3px;
+  --gap-sm: 3px;
+}
+
+.daw-workspace.density-large {
+  --btn-h: 28px;
+  --btn-w: 32px;
+  --btn-font: 12px;
+  --font-track: 15px;
+  --font-label: 13px;
+  --track-pad: 10px 10px 8px;
+  --gap-sm: 6px;
+}
+
+/* ── Panel resize handles ── */
+.panel-resize-handle {
+  background: transparent;
+  flex-shrink: 0;
+  z-index: 50;
+  transition: background 0.12s;
+  position: relative;
+}
+.panel-resize-handle:hover {
+  background: rgba(0, 255, 204, 0.25);
+}
+.panel-resize-handle:active {
+  background: rgba(0, 255, 204, 0.4);
+}
+.panel-resize-h {
+  width: 4px;
+  cursor: col-resize;
+  align-self: stretch;
+}
+.panel-resize-v {
+  height: 4px;
+  cursor: row-resize;
+  width: 100%;
+}
+
+/* ── DAW Control grant banner (artist side) ─────────────────────────────── */
+.daw-control-request-banner {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8000;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #1a1b22;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: 12px;
+  padding: 14px 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(245, 158, 11, 0.15);
+  min-width: 420px;
+  animation: daw-banner-in 0.2s ease-out;
+}
+
+@keyframes daw-banner-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.daw-control-request-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.daw-control-request-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.daw-control-request-text strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.daw-control-request-text span {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.daw-control-grant-btn {
+  border: none;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.daw-control-grant-btn.accept {
+  background: #00e5b4;
+  color: #0d1a16;
+}
+.daw-control-grant-btn.accept:hover { background: #00ffcc; }
+
+.daw-control-grant-btn.deny {
+  background: rgba(255, 77, 77, 0.12);
+  color: #ff4d4d;
+  border: 1px solid rgba(255, 77, 77, 0.25);
+}
+.daw-control-grant-btn.deny:hover { background: rgba(255, 77, 77, 0.2); }
+
+/* ── Artist: persistent control status bar — stacks one row per active permission ─ */
+.daw-engineer-control-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 14px;
+  background: rgba(0, 229, 180, 0.06);
+  border-bottom: 1px solid rgba(0, 229, 180, 0.18);
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.daw-ec-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 20px;
+}
+
+.daw-ec-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00e5b4;
+  box-shadow: 0 0 5px #00e5b4;
+  flex-shrink: 0;
+  animation: daw-ec-pulse 2.4s ease-in-out infinite;
+}
+
+.daw-ec-dot.desktop {
+  background: #ff7744;
+  box-shadow: 0 0 5px #ff7744;
+  animation: daw-ec-pulse-desktop 2.4s ease-in-out infinite;
+}
+
+.daw-ec-dot.view {
+  background: #f0c040;
+  box-shadow: 0 0 5px #f0c040;
+  animation: daw-ec-pulse-view 2.4s ease-in-out infinite;
+}
+
+@keyframes daw-ec-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 5px #00e5b4; }
+  50%       { opacity: 0.6; box-shadow: 0 0 2px #00e5b4; }
+}
+
+@keyframes daw-ec-pulse-desktop {
+  0%, 100% { opacity: 1; box-shadow: 0 0 5px #ff7744; }
+  50%       { opacity: 0.6; box-shadow: 0 0 2px #ff7744; }
+}
+
+@keyframes daw-ec-pulse-view {
+  0%, 100% { opacity: 1; box-shadow: 0 0 5px #f0c040; }
+  50%       { opacity: 0.6; box-shadow: 0 0 2px #f0c040; }
+}
+
+.daw-ec-label {
+  color: #00e5b4;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+}
+
+.daw-ec-label.desktop { color: #ff7744; }
+.daw-ec-label.view    { color: #f0c040; }
+
+.daw-ec-follow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: #64748b;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.daw-ec-follow:hover { color: #94a3b8; }
+
+.daw-ec-follow input[type="checkbox"] {
+  accent-color: #00e5b4;
+  width: 11px;
+  height: 11px;
+  cursor: pointer;
+}
+
+.daw-ec-revoke-btn {
+  margin-left: auto;
+  background: rgba(255, 77, 77, 0.1);
+  border: 1px solid rgba(255, 77, 77, 0.2);
+  border-radius: 5px;
+  color: #ff4d4d;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 10px;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.daw-ec-revoke-btn:hover {
+  background: rgba(255, 77, 77, 0.2);
+  border-color: rgba(255, 77, 77, 0.4);
+}
+
+/* ── Artist: glowing border when Desktop Control is active ─────────────────── */
+.daw-workspace.rc-desktop-active {
+  box-shadow: inset 0 0 0 2px rgba(255, 119, 68, 0.35), inset 0 0 28px rgba(255, 119, 68, 0.05);
+}
+
+.daw-workspace.rc-screen-view-active {
+  box-shadow: inset 0 0 0 2px rgba(240, 192, 64, 0.3), inset 0 0 28px rgba(240, 192, 64, 0.04);
+}
+
+/* ── Engineer: Remote Session header ────────────────────────────────────────── */
+.daw-remote-studio-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 14px;
+  background: rgba(124, 58, 237, 0.07);
+  border-bottom: 1px solid rgba(124, 58, 237, 0.18);
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.daw-rs-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7c3aed;
+  box-shadow: 0 0 5px #7c3aed;
+  flex-shrink: 0;
+}
+
+.daw-rs-label {
+  color: #a78bfa;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+}
+
+.daw-rs-sep {
+  width: 1px;
+  height: 14px;
+  background: rgba(124, 58, 237, 0.25);
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+
+.daw-rs-chip {
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #64748b;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid #1c1e24;
+}
+
+.daw-rs-chip.active {
+  color: #00e5b4;
+  background: rgba(0,229,180,0.06);
+  border-color: rgba(0,229,180,0.2);
+}
+
+.daw-rs-chip.off {
+  color: #475569;
+}
+
+.daw-rs-exit-btn {
+  margin-left: auto;
+  background: rgba(124, 58, 237, 0.1);
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  border-radius: 5px;
+  color: #a78bfa;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  font-family: inherit;
+}
+
+.daw-rs-exit-btn:hover {
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(124, 58, 237, 0.45);
+}

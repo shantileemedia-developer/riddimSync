@@ -1,0 +1,574 @@
+﻿/* â”€â”€â”€ MixerPanel â€” Cubase Style â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.mixer-panel {
+  display: flex;
+  flex-direction: column;
+  height: var(--mixer-h, 420px);
+  min-height: 200px;
+  max-height: 560px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #1a1c2e 0%, #14151f 100%);
+  border-top: 2px solid #0a0a0e;
+  overflow: hidden;
+  user-select: none;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mixer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  min-height: 22px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  background: #1e1e28;
+  border-bottom: 1px solid #0a0a0e;
+}
+.mixer-header-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #aaa;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mixer-header-key {
+  background: #141418;
+  border: 1px solid #3a3a44;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 9px;
+  color: #777;
+  font-weight: 600;
+}
+.mixer-header-info { font-size: 10px; color: #555; }
+
+/* â”€â”€ Body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mixer-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+.mixer-channels {
+  display: flex;
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a44 #14151f;
+  padding: 6px 5px 8px;
+  gap: 3px;
+  align-items: stretch;
+}
+.mixer-channels::-webkit-scrollbar       { height: 6px; }
+.mixer-channels::-webkit-scrollbar-track { background: #14151f; }
+.mixer-channels::-webkit-scrollbar-thumb { background: #3a3a44; border-radius: 3px; }
+.mixer-master-divider { width: 2px; background: #0a0a0e; flex-shrink: 0; }
+
+/* â”€â”€ Channel Strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mixer-ch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 78px; /* was 94px */
+  min-width: 78px; /* was 94px */
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid #353858;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07),
+              inset 0 -1px 0 rgba(0,0,0,0.4),
+              2px 0 4px rgba(0,0,0,0.5);
+  padding: 5px 4px 5px;
+  box-sizing: border-box;
+  cursor: pointer;
+  overflow: hidden;
+}
+.mixer-master {
+  width: 84px; /* was 100px */
+  min-width: 84px; /* was 100px */
+  border: 2px solid #8080a0;
+  box-shadow: 0 0 6px rgba(112,114,160,0.35), inset 0 1px 0 rgba(255,255,255,0.07);
+  flex-shrink: 0;
+  overflow: visible; /* allow color picker popup to escape */
+}
+
+/* â”€â”€ Group bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mch-group-bar {
+  width: 100%;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+.mch-group-select {
+  width: 100%;
+  background: #1a1c2c;
+  border: 1px solid #444;
+  border-radius: 2px;
+  color: #888;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 1px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  user-select: none;
+  box-sizing: border-box;
+}
+.mch-group-select::after {
+  content: '▾';
+  font-size: 8px;
+  color: #666;
+  flex-shrink: 0;
+}
+.mch-group-select:hover {
+  border-color: #666;
+  color: #aaa;
+}
+.mch-group-select.assigned {
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+/* ── Group dropdown menu (portalled to body) ── */
+.group-menu {
+  z-index: 9999;
+  background: #1c1d22;
+  border: 1px solid #333;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+  min-width: 120px;
+  overflow: hidden;
+  padding: 3px;
+}
+.group-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: #aaa;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.1s, color 0.1s;
+}
+.group-menu-item:hover {
+  background: rgba(255,255,255,0.07);
+  color: #fff;
+}
+.group-menu-item.active {
+  color: #fff;
+  background: rgba(255,255,255,0.1);
+}
+.group-menu-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* â”€â”€ LED dot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mch-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin: 2px auto 2px;
+}
+
+/* â”€â”€ Pan LCD (above knob) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mch-pan-lcd {
+  display: flex;
+  width: 100%;
+  background: #141624;
+  border: 1px solid #2a2c40;
+  border-radius: 2px;
+  margin-bottom: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.mch-pan-seg {
+  flex: 1;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 8px;
+  font-weight: bold;
+  color: #bbb;
+  padding: 1px 3px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.mch-pan-seg.left  { text-align: left; }
+.mch-pan-seg.right { text-align: right; color: #999; }
+
+/* â”€â”€ Knob row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mch-knob-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  margin: 1px 0 3px;
+}
+.mch-lr-label {
+  font-size: 8px;
+  font-weight: bold;
+  color: #888;
+  line-height: 1;
+}
+.pan-wrap {
+  cursor: ns-resize;
+  display: flex;
+  justify-content: center;
+}
+
+/* â”€â”€ Button rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mch-btn-row {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  margin-bottom: 4px;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.mch-btn {
+  width: 30px;
+  height: 24px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  letter-spacing: 0.5px;
+  user-select: none;
+  background: linear-gradient(180deg, #b8b2a8 0%, #787268 100%);
+  border-top: 1px solid #aaa;
+  border-left: 1px solid #aaa;
+  border-bottom: 1px solid #222;
+  border-right: 1px solid #222;
+  color: #111;
+  font-family: Arial, sans-serif;
+  opacity: 0.58;
+  transition: opacity 0.1s;
+}
+.mch-btn:hover { opacity: 0.78; }
+.mch-btn:active { filter: brightness(0.85); }
+.mch-btn.on { opacity: 1; }
+
+.mch-input-btn {
+  background: #4a4c60;
+  color: #fff;
+  border-top: 1px solid #666;
+  border-left: 1px solid #666;
+  border-bottom: 1px solid #222;
+  border-right: 1px solid #222;
+}
+
+.mch-rec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ffffff;
+  display: inline-block;
+}
+.mch-rec-btn {
+  background: #6a2a2a;
+  color: #fff;
+  border-top: 1px solid #666;
+  border-left: 1px solid #666;
+  border-bottom: 1px solid #222;
+  border-right: 1px solid #222;
+}
+.mch-rec-btn.on { background: linear-gradient(180deg, #701818, #b02020); }
+.mch-rec-btn.on .mch-rec-dot { background: #ff2828; box-shadow: 0 0 6px #ff2828; }
+
+.mch-solo-btn {
+  background: #4a4c60;
+  color: #fff;
+  border-top: 1px solid #666;
+  border-left: 1px solid #666;
+  border-bottom: 1px solid #222;
+  border-right: 1px solid #222;
+}
+.mch-solo-btn.on { background: linear-gradient(180deg, #c0a800, #e8cc00); color: #0a0800; }
+
+.mch-mute-btn {
+  background: #4a4c60;
+  color: #fff;
+  border-top: 1px solid #666;
+  border-left: 1px solid #666;
+  border-bottom: 1px solid #222;
+  border-right: 1px solid #222;
+}
+.mch-mute-btn.on { background: linear-gradient(180deg, #8a2e00, #cc4800); color: #fff; }
+
+/* â”€â”€ Strip: scale | L-meter | fader | R-meter | scale â”€â”€â”€â”€â”€ */
+.mch-fader-area {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  margin: 4px 0 3px;
+  overflow: hidden;
+}
+
+/* Left dB scale */
+.mch-db-scale {
+  width: 13px;
+  flex-shrink: 0;
+  position: relative;
+  overflow: visible;
+}
+.mch-scale-mark {
+  position: absolute;
+  right: 1px;
+  transform: translateY(-50%);
+  font-size: 7px;
+  color: #556677; /* was #99aabb */
+  font-family: 'Consolas', monospace;
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* L / R meter columns */
+.mch-meter-col {
+  width: 9px;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+/* Fader column â€” remaining space */
+.mch-fader-col {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+/* Right (meter) scale */
+.mch-meter-scale {
+  width: 13px;
+  flex-shrink: 0;
+  position: relative;
+  overflow: visible;
+}
+.mch-meter-mark {
+  position: absolute;
+  left: 1px;
+  transform: translateY(-50%);
+  font-size: 7px;
+  color: #556677; /* was #99aabb */
+  font-family: 'Consolas', monospace;
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
+  text-align: left;
+}
+
+/* VU canvas fills its column */
+.mixer-vu-canvas { width: 100%; height: 100%; display: block; }
+
+/* â”€â”€ Vertical fader internals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.vfader-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.vfader-track {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #111318;
+  border: 1px solid #252830;
+  border-radius: 3px;
+  cursor: ns-resize;
+}
+.vfader-cap {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22px; /* was 30px */
+  height: 30px; /* was 20px */
+  border-radius: 3px;
+  cursor: ns-resize;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px; /* was 2px */
+}
+.vfader-grip {
+  width: 14px; /* was 18px */
+  height: 1px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+/* â”€â”€ Peak readout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mch-peak-box {
+  width: 100%;
+  background: #0d0f1a;
+  border: 1px solid #252838;
+  border-radius: 2px;
+  padding: 2px 3px;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  flex-shrink: 0;
+}
+.mch-pv {
+  font-size: 9px;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  color: #22cc22;
+}
+
+/* â”€â”€ Routing / din row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mch-routing-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  margin-bottom: 3px;
+  flex-shrink: 0;
+}
+.mch-route-arrow {
+  width: 11px;
+  height: 15px;
+  background: #1a2030;
+  border: 1px solid #2a3040;
+  border-radius: 2px;
+  color: #556;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.mch-route-arrow:hover { color: #99aabb; }
+.mch-route-label {
+  flex: 1;
+  height: 15px;
+  background: #1a3050;
+  border: 1px solid #2a4060;
+  border-radius: 2px;
+  color: #4488bb;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* â”€â”€ Track name bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.mch-name-bar {
+  width: 100%;
+  border-top: 3px solid transparent;
+  border-radius: 0 0 2px 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  margin-top: 1px;
+}
+.mch-name-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  font-size: 10px;
+  font-weight: bold;
+  color: #ccc;
+  text-align: center;
+  padding: 3px 2px;
+  font-family: Arial, sans-serif;
+  outline: none;
+  cursor: text;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mch-name-input:focus { background: rgba(0,0,0,0.4); }
+
+/* â”€â”€ Master color picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.master-color-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(255,255,255,0.3);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.master-color-swatch:hover { border-color: rgba(255,255,255,0.7); }
+.master-color-picker {
+  width: 160px;
+  background: #1e1e28;
+  border: 1px solid #3a3a4a;
+  border-radius: 4px;
+  padding: 6px;
+  z-index: 9999;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+}
+.master-picker-title {
+  font-size: 9px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+.master-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+.master-palette-cell {
+  width: 16px;
+  height: 16px;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.master-palette-cell:hover { border-color: rgba(255,255,255,0.6); }
+.master-palette-cell.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.4);
+}
+
+/* ── Mixer channel strip uses density tokens from DawWorkspace ── */
+.mch-btn {
+  width: var(--btn-w, 30px);
+  height: var(--btn-h, 24px);
+  font-size: var(--btn-font, 9px);
+}
+
+/* -- Clip LED ------------------------------------------------- */
+.mch-clip-led {
+  width: 100%;
+  height: 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  background: #1a0500;
+  margin-bottom: 2px;
+  transition: background 0.05s;
+}
+

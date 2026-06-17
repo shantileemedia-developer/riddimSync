@@ -1,0 +1,361 @@
+/* ── Audio/MIDI Preferences Dialog ────────────────────────────────────────────── */
+
+.apd-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.apd-dialog {
+  width: 520px;
+  background: #1e2028;
+  border: 1px solid #383c46;
+  border-radius: 6px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 13px;
+  color: #c8cad4;
+}
+
+/* ── Title bar ── */
+.apd-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 9px;
+  background: linear-gradient(to bottom, #2a2d38, #20232c);
+  border-bottom: 1px solid #12141a;
+  flex-shrink: 0;
+}
+
+.apd-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #a0a4b0;
+  letter-spacing: 0.3px;
+}
+
+.apd-close {
+  background: none;
+  border: none;
+  color: #606470;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 3px;
+  line-height: 1;
+}
+.apd-close:hover { background: #ff3b3033; color: #ff3b30; }
+
+/* ── Tabs ── */
+.apd-tabs {
+  display: flex;
+  gap: 0;
+  padding: 8px 14px 0;
+  background: #181a22;
+  border-bottom: 1px solid #282c38;
+  flex-shrink: 0;
+}
+
+.apd-tab {
+  padding: 6px 18px 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #686c7a;
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: color 0.1s, background 0.1s;
+}
+.apd-tab:hover { color: #9a9eb0; background: #20222c; }
+.apd-tab.active {
+  color: #d0d4e0;
+  background: #1e2028;
+  border-color: #282c38;
+  border-bottom-color: #1e2028;
+}
+
+/* ── Body ── */
+.apd-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: #2a2d38 transparent;
+}
+
+/* ── General tab rows ── */
+.apd-general {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.apd-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.apd-row > label {
+  width: 150px;
+  min-width: 150px;
+  text-align: right;
+  color: #888a9a;
+  font-size: 12.5px;
+}
+
+.apd-row-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.apd-select {
+  height: 26px;
+  padding: 0 8px;
+  background: #14161e;
+  border: 1px solid #2e3040;
+  border-radius: 3px;
+  color: #c0c4d0;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  min-width: 160px;
+}
+.apd-select:focus { border-color: #4a6090; }
+.apd-select:disabled { opacity: 0.5; cursor: default; }
+.apd-select-wide { min-width: 240px; }
+.apd-select-ch   { min-width: 120px; }
+
+.apd-num-input {
+  height: 26px;
+  width: 80px;
+  padding: 0 8px;
+  background: #14161e;
+  border: 1px solid #2e3040;
+  border-radius: 3px;
+  color: #c0c4d0;
+  font-size: 12px;
+  outline: none;
+  text-align: right;
+}
+.apd-num-input:focus { border-color: #4a6090; }
+.apd-num-small { width: 52px; }
+
+.apd-unit {
+  font-size: 12px;
+  color: #60647a;
+}
+
+.apd-separator {
+  height: 1px;
+  background: #22242e;
+  margin: 6px 0;
+}
+
+/* ── Channel routing ── */
+.apd-routing {
+  display: flex;
+  gap: 20px;
+  padding: 4px 0;
+}
+
+.apd-routing-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.apd-routing-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #686c7a;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #22242e;
+}
+
+.apd-routing-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.apd-ch-num {
+  font-size: 11.5px;
+  color: #586070;
+  width: 22px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ── Engine status ── */
+.apd-engine-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.apd-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a3c50;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.apd-status-dot.on { background: #00c864; box-shadow: 0 0 6px #00c86488; }
+
+.apd-status-label {
+  font-size: 12.5px;
+  color: #8890a0;
+}
+
+.apd-latency {
+  font-size: 12px;
+  color: #686c7a;
+  margin-top: 4px;
+  padding-left: 16px;
+}
+
+.apd-restart {
+  margin-top: 8px;
+}
+
+/* ── Buttons ── */
+.apd-btn-secondary {
+  height: 26px;
+  padding: 0 14px;
+  background: linear-gradient(180deg, #2a2d3a 0%, #1e2028 100%);
+  border: 1px solid #383c4a;
+  border-radius: 3px;
+  color: #9094a4;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.apd-btn-secondary:hover { background: linear-gradient(180deg, #32364a 0%, #262a36 100%); color: #b0b4c4; }
+
+.apd-btn-primary {
+  height: 30px;
+  padding: 0 28px;
+  background: #2a5adc;
+  border: 1px solid #1e4ab8;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.apd-btn-primary:hover { background: #3568e8; }
+
+/* ── MIDI tabs ── */
+.apd-midi {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.apd-midi-hint {
+  font-size: 12px;
+  color: #60647a;
+}
+
+.apd-midi-empty {
+  text-align: center;
+  padding: 40px 0;
+  color: #484c5e;
+  font-size: 12.5px;
+}
+
+.apd-midi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.apd-midi-table th {
+  text-align: left;
+  padding: 6px 10px;
+  color: #686c7a;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #22242e;
+}
+.apd-midi-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #1a1c24;
+  color: #a0a4b4;
+}
+.apd-midi-table td:last-child { text-align: center; width: 60px; }
+.apd-midi-table tr:last-child td { border-bottom: none; }
+.apd-midi-table tr:hover td { background: #1c1e28; }
+
+/* ── Footer ── */
+.apd-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 20px;
+  background: #181a22;
+  border-top: 1px solid #12141a;
+  flex-shrink: 0;
+}
+
+/* ── Test Input VU meter ── */
+.apd-btn-active {
+  background: linear-gradient(180deg, #003a28 0%, #002018 100%) !important;
+  border-color: #00c86488 !important;
+  color: #00ffcc !important;
+}
+
+.apd-vu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.apd-vu-label {
+  font-size: 10px;
+  color: #60647a;
+  width: 30px;
+  flex-shrink: 0;
+}
+
+.apd-vu-track {
+  flex: 1;
+  height: 8px;
+  background: #14161e;
+  border: 1px solid #2e3040;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.apd-vu-fill {
+  height: 100%;
+  border-radius: 4px;
+  will-change: width, background;
+}
+
+.apd-vu-pct {
+  font-size: 10px;
+  color: #9094a4;
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}

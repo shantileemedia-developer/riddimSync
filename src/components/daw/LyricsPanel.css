@@ -1,0 +1,116 @@
+.lyrics-panel {
+  width: 400px;
+  height: 320px;
+  background: rgba(12, 12, 18, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(0, 255, 204, 0.06);
+  overflow: hidden;
+  resize: both;
+  min-width: 260px;
+  min-height: 160px;
+  z-index: 600;
+}
+
+.lyrics-panel--expanded {
+  width: auto !important;
+  height: auto !important;
+  resize: none;
+  border-radius: 4px;
+}
+
+/* ── Header ── */
+.lyrics-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 6px 5px 10px;
+  background: rgba(255, 255, 255, 0.035);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.lyrics-panel__header:active {
+  cursor: grabbing;
+}
+
+.lyrics-panel__title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #00ffcc;
+  flex-shrink: 0;
+}
+
+/* ── Controls strip ── */
+.lyrics-panel__controls {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.lyrics-panel__controls button {
+  background: none;
+  border: 1px solid transparent;
+  color: #555;
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.lyrics-panel__controls button:hover {
+  color: #bbb;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.lyrics-panel__controls button.active {
+  color: #00ffcc;
+  border-color: rgba(0, 255, 204, 0.28);
+  background: rgba(0, 255, 204, 0.07);
+}
+
+.lyrics-panel__divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+
+.lyrics-panel__font-size {
+  font-size: 10px;
+  color: #444;
+  min-width: 30px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ── Textarea ── */
+.lyrics-panel__textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  resize: none;
+  color: #d4d4d8;
+  padding: 14px 16px;
+  line-height: 1.85;
+  font-family: inherit;
+  outline: none;
+  overflow-y: auto;
+}
+
+.lyrics-panel__textarea::placeholder {
+  color: #252530;
+}

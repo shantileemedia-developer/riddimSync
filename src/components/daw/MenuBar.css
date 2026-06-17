@@ -1,0 +1,460 @@
+.menu-bar {
+  height: 34px;
+  background-color: #141517;
+  border-bottom: 1px solid #0e0f10;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  user-select: none;
+  position: relative;
+  z-index: 500;
+  /* Entire menu bar is draggable — interactive children opt out below */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.menu-bar-logo {
+  padding: 0 16px;
+  flex-shrink: 0;
+  border-right: 1px solid #2a2b2e;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+/* Everything interactive inside the bar must opt out of drag */
+.menu-bar-logo *,
+.menu-bar-menus,
+.menu-bar-item,
+.menu-bar-project,
+.menu-bar-project * {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.menu-bar-brand {
+  font-size: 13px;
+  font-weight: 700;
+  color: #00ffcc;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.menu-bar-menus {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  height: 100%;
+}
+
+.menu-bar-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  cursor: pointer;
+  height: 100%;
+  transition: background 0.1s;
+}
+
+.menu-bar-item:hover,
+.menu-bar-item.open {
+  background-color: #2a2b2e;
+}
+
+.menu-bar-label {
+  font-size: 13px;
+  color: #c8c8c8;
+  white-space: nowrap;
+  font-weight: 400;
+}
+
+.menu-bar-item:hover .menu-bar-label,
+.menu-bar-item.open .menu-bar-label {
+  color: #f2f2f2;
+}
+
+/* ── Dropdown ────────────────────────────── */
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 230px;
+  background-color: #232426;
+  border: 1px solid #3a3b3e;
+  border-top: none;
+  border-radius: 0 0 5px 5px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.75);
+  z-index: 600;
+  padding: 4px 0;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 18px;
+  font-size: 12px;
+  color: #d0d0d0;
+  cursor: pointer;
+  white-space: nowrap;
+  gap: 28px;
+  transition: background 0.08s;
+}
+
+.menu-item:hover {
+  background-color: #00ffcc18;
+  color: #f2f2f2;
+}
+
+.menu-item.disabled {
+  color: #505050;
+  cursor: default;
+}
+
+.menu-item.disabled:hover {
+  background-color: transparent;
+  color: #505050;
+}
+
+.menu-item-label {
+  flex: 1;
+}
+
+.menu-item-shortcut {
+  font-size: 11px;
+  color: #666;
+  font-family: 'Consolas', monospace;
+  flex-shrink: 0;
+}
+
+.menu-separator {
+  height: 1px;
+  background-color: #2e2f33;
+  margin: 4px 0;
+}
+
+/* ── Project name (center) ───────────── */
+.menu-bar-project {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  pointer-events: all;  /* allow rename click */
+}
+
+.menu-project-name {
+  font-size: 11px;
+  color: #606266;
+  font-style: italic;
+  letter-spacing: 0.2px;
+  cursor: default;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s;
+}
+.menu-project-name:hover {
+  color: #9a9da8;
+  background: rgba(255,255,255,0.04);
+}
+
+.menu-project-name-input {
+  font-size: 11px;
+  font-style: italic;
+  color: #fff;
+  background: #2a2b2e;
+  border: 1px solid #00ffcc44;
+  border-radius: 3px;
+  padding: 2px 8px;
+  outline: none;
+  width: 200px;
+  text-align: center;
+  font-family: inherit;
+}
+
+.menu-admin-btn {
+  margin-left: 8px;
+  padding: 2px 10px;
+  border: 1px solid #00ffcc55;
+  border-radius: 4px;
+  background: transparent;
+  color: #00ffcc;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: background 0.12s, border-color 0.12s;
+}
+.menu-admin-btn:hover {
+  background: rgba(0, 255, 204, 0.08);
+  border-color: #00ffcc99;
+}
+
+/* Compact on small-height screens */
+@media (max-height: 820px) {
+  .menu-bar { height: 28px; }
+  .menu-bar-brand { font-size: 11px; }
+  .menu-item { font-size: 11px; padding: 0 8px; }
+  .menu-bar-logo { padding: 0 10px; }
+}
+@media (max-height: 680px) {
+  .menu-bar { height: 24px; }
+  .menu-item { font-size: 10px; padding: 0 6px; }
+}
+
+/* ── Local toast (menu feedback) ── */
+.menu-local-toast {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e1f22;
+  border: 1px solid #3a3b3e;
+  color: #c8c9cc;
+  font-size: 13px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  z-index: 9999;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Modal overlay & base ── */
+.menu-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+}
+
+.menu-modal {
+  background: #1e1f22;
+  border: 1px solid #3a3b3e;
+  border-radius: 10px;
+  padding: 24px 28px;
+  min-width: 360px;
+  max-width: 560px;
+  width: 90vw;
+  color: #c8c9cc;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+}
+
+.menu-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 12px;
+}
+
+.menu-modal-version {
+  font-size: 13px;
+  color: #888;
+  margin: 0;
+}
+
+.menu-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.menu-modal-btn {
+  padding: 7px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: none;
+  cursor: pointer;
+}
+.menu-modal-btn.primary {
+  background: #00ffcc;
+  color: #000;
+  font-weight: 600;
+}
+.menu-modal-btn.primary:hover { background: #00e6b8; }
+.menu-modal-btn.secondary {
+  background: #2a2b2e;
+  color: #c8c9cc;
+}
+.menu-modal-btn.secondary:hover { background: #333; }
+
+/* ── Shortcuts modal ── */
+.shortcuts-modal { max-width: 500px; }
+
+.shortcuts-table {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  max-height: 55vh;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+
+.shortcuts-row {
+  display: contents;
+}
+
+.shortcut-key {
+  display: inline-block;
+  background: #2a2b2e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-family: monospace;
+  color: #00ffcc;
+  white-space: nowrap;
+  align-self: center;
+}
+
+.shortcut-action {
+  font-size: 13px;
+  color: #c8c9cc;
+  align-self: center;
+  padding: 3px 0;
+}
+
+/* ── Notepad modal ── */
+.notepad-modal { max-width: 540px; }
+
+.notepad-textarea {
+  width: 100%;
+  background: #141517;
+  color: #c8c9cc;
+  border: 1px solid #3a3b3e;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: monospace;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.notepad-textarea:focus { outline: none; border-color: #00ffcc44; }
+
+/* ── Project Setup modal ── */
+.project-setup-modal { max-width: 440px; }
+
+.project-setup-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.setup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setup-row label {
+  font-size: 13px;
+  color: #888;
+  white-space: nowrap;
+  min-width: 120px;
+}
+
+.setup-value {
+  font-size: 13px;
+  color: #c8c9cc;
+}
+
+.setup-link {
+  color: #00ffcc;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.setup-input {
+  background: #141517;
+  border: 1px solid #3a3b3e;
+  border-radius: 5px;
+  color: #fff;
+  font-size: 14px;
+  padding: 4px 8px;
+  width: 80px;
+  text-align: right;
+}
+.setup-input:focus { outline: none; border-color: #00ffcc44; }
+
+/* ── Window control buttons (Electron — replaces native title bar controls) ── */
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.wc-btn {
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: #a0a0a0;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  -webkit-app-region: no-drag;
+}
+
+.wc-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.wc-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+
+/* ── Export progress overlay ── */
+.export-progress-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.export-progress-box {
+  background: #1e2022;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 20px 28px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: #e0e0e0;
+  font-size: 14px;
+  min-width: 240px;
+}
+
+.export-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #333;
+  border-top-color: #00ffcc;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

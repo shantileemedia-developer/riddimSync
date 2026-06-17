@@ -1,0 +1,90 @@
+/* ── Floating badge (engineer & artist) ─────────────────────────────────── */
+.rc-badge-wrap {
+  position: fixed;
+  top: 14px;
+  left: 70%;
+  transform: translateX(-50%);
+  z-index: 99999;
+  pointer-events: none;
+}
+
+.rc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 10px;
+  background: rgba(20, 20, 30, 0.88);
+  border: 1px solid rgba(255, 80, 80, 0.55);
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+  pointer-events: all;
+  user-select: none;
+}
+
+.rc-badge-view {
+  border-color: rgba(255, 200, 0, 0.55);
+}
+
+/* Blinking red dot */
+.rc-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4444;
+  flex-shrink: 0;
+  animation: rc-blink 1.2s ease-in-out infinite;
+}
+
+.rc-badge-view .rc-badge-dot {
+  background: #ffcc00;
+}
+
+@keyframes rc-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.15; }
+}
+
+.rc-badge-label {
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.9);
+  text-transform: uppercase;
+}
+
+.rc-badge-exit {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.45);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+  transition: color 0.15s;
+}
+
+.rc-badge-exit:hover {
+  color: rgba(255, 80, 80, 0.9);
+}
+
+/* ── Hide artist's own cursor — only the engineer's dot is visible ────────── */
+body.rc-artist-active * {
+  cursor: none !important;
+}
+
+/* ── Engineer cursor dot on artist's screen ──────────────────────────────── */
+.rc-remote-cursor {
+  position: fixed;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  border: 2px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  pointer-events: none;
+  z-index: 99998;
+  transform: translate(-50%, -50%);
+}
+

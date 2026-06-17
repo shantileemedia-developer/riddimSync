@@ -1,0 +1,947 @@
+.arrange-window {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: #121212;
+  overflow: hidden;
+  position: relative;
+  min-width: 0;
+  user-select: none;
+}
+
+/* ── Drag-over overlay ──────────────────────────── */
+.arrange-content.drag-over {
+  outline: 2px dashed #00ffcc;
+  outline-offset: -2px;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 255, 204, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.drop-overlay-text {
+  background-color: rgba(0, 255, 204, 0.15);
+  border: 1px solid #00ffcc55;
+  color: #00ffcc;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 6px;
+  letter-spacing: 0.3px;
+}
+
+/* ── Split preview line ─────────────────────────── */
+.split-preview-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: #fff;
+  opacity: 0.85;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* ── Region states ──────────────────────────────── */
+.region-muted {
+  opacity: 0.38;
+}
+
+.region-disabled-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #ff6b6b;
+  background: rgba(255, 60, 60, 0.18);
+  border: 1px solid rgba(255, 60, 60, 0.35);
+  border-radius: 2px;
+  padding: 0 3px;
+  margin-right: 4px;
+  line-height: 1.4;
+}
+
+.region-dragging {
+  opacity: 0.75;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  z-index: 5;
+}
+
+.region-selected {
+  outline: 2px solid rgba(255,255,255,0.85);
+  outline-offset: -2px;
+  z-index: 3;
+}
+
+.region-lasso-selected {
+  outline: 2px solid rgba(0, 220, 180, 0.9);
+  outline-offset: -2px;
+  z-index: 3;
+}
+
+/* ── Lasso rubber-band box ──────────────────────── */
+.lasso-box {
+  position: absolute;
+  border: 1.5px dashed rgba(0, 220, 180, 0.85);
+  background: rgba(0, 220, 180, 0.08);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 100;
+}
+
+/* ── Track drop-target highlight ────────────────── */
+.arrange-track.track-drop-target {
+  background-color: rgba(0, 255, 204, 0.06);
+}
+
+/* ── File-drag ghost region ─────────────────────── */
+.region-drop-ghost {
+  position: absolute;
+  border: 2px dashed #00ffcc;
+  border-radius: 4px;
+  background-color: rgba(0, 255, 204, 0.07);
+  pointer-events: none;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 8px;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.ghost-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #00ffcc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ghost-pos {
+  font-size: 10px;
+  color: rgba(0, 255, 204, 0.55);
+  font-family: 'Consolas', monospace;
+}
+
+/* ── Range selection box ────────────────────────── */
+.range-selection-box {
+  position: absolute;
+  top: 0;
+  background-color: rgba(0, 200, 255, 0.08);
+  border: 1px solid rgba(0, 200, 255, 0.35);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ── Clip right-click context menu ─────────────── */
+.clip-context-menu {
+  position: fixed;
+  background-color: #23252a;
+  border: 1px solid #3a3b3e;
+  border-radius: 6px;
+  padding: 4px 0;
+  z-index: 410;
+  min-width: 160px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.04);
+}
+
+.clip-menu-item {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 7px 14px;
+  text-align: left;
+  color: #d0d0d0;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.clip-menu-item:hover {
+  background-color: rgba(0, 255, 204, 0.1);
+  color: #fff;
+}
+
+/* ── Right-click mini toolbox ───────────────────── */
+.mini-toolbox {
+  position: fixed;
+  background-color: #23252a;
+  border: 1px solid #3a3b3e;
+  border-radius: 8px;
+  padding: 5px;
+  z-index: 400;
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.04);
+}
+
+.mini-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #848890;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  flex-shrink: 0;
+}
+.mini-tool-btn:hover {
+  background-color: #2e3038;
+  color: #d0d4dc;
+  border-color: #3a3c44;
+}
+.mini-tool-btn.active {
+  background-color: rgba(0, 255, 204, 0.15);
+  color: #00ffcc;
+  border-color: rgba(0, 255, 204, 0.4);
+}
+.mini-tool-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.mini-toolbox-divider {
+  width: 1px;
+  align-self: stretch;
+  background-color: #3a3b3e;
+  margin: 3px 2px;
+  flex-shrink: 0;
+}
+
+/* Loop & Punch Overlays */
+.loop-overlay {
+  position: absolute;
+  top: 0;
+  background-color: rgba(0, 150, 255, 0.1);
+  pointer-events: none;
+  z-index: 5;
+  border-left: 2px solid rgba(0, 150, 255, 0.8);
+  border-right: 2px solid rgba(0, 150, 255, 0.8);
+}
+
+.loop-overlay-header {
+  position: absolute;
+  top: -22px;
+  width: 100%;
+  height: 22px;
+  pointer-events: auto;
+}
+
+.loop-handle {
+  position: absolute;
+  top: 0;
+  width: 12px;
+  height: 22px;
+  cursor: ew-resize;
+}
+
+.loop-handle.left {
+  left: -6px;
+}
+
+.loop-handle.right {
+  right: -6px;
+}
+
+.punch-overlay {
+  position: absolute;
+  top: 0;
+  background-color: rgba(255, 50, 50, 0.1);
+  pointer-events: none;
+  z-index: 4;
+  border-left: 2px dashed rgba(255, 50, 50, 0.6);
+  border-right: 2px dashed rgba(255, 50, 50, 0.6);
+}
+
+/* Markers */
+.marker-lane {
+  height: 20px;
+  background-color: #26272a;
+  border-bottom: 1px solid #1a1b1e;
+  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+}
+
+.marker-flag {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid #ff4d4d;
+  display: flex;
+  align-items: center;
+}
+
+.marker-name {
+  background-color: #ff4d4d;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 0 2px 2px 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.marker-name:hover {
+  background-color: #ff6666;
+}
+
+.marker-delete-btn {
+  display: none;
+  background: #991f1f;
+  border: none;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  padding: 1px 5px;
+  cursor: pointer;
+  border-radius: 0 2px 2px 0;
+  margin-left: 1px;
+}
+.marker-delete-btn:hover { background: #cc2222; }
+.marker-flag:hover .marker-delete-btn { display: block; }
+
+/* Marker name/add dialog */
+.marker-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.marker-dialog {
+  background: #1e1f22;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 20px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+.marker-dialog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+  letter-spacing: 0.02em;
+}
+.marker-dialog-input {
+  background: #121212;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+.marker-dialog-input:focus {
+  border-color: #00ffcc;
+  box-shadow: 0 0 0 2px rgba(0, 255, 204, 0.12);
+}
+.marker-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.marker-dialog-btn {
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 16px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.marker-dialog-btn.cancel {
+  background: #2a2b2e;
+  color: #c0c0c0;
+}
+.marker-dialog-btn.cancel:hover { background: #363739; }
+.marker-dialog-btn.confirm {
+  background: #00ffcc;
+  color: #111;
+}
+.marker-dialog-btn.confirm:hover { background: #00e6b8; }
+
+.arrange-track.track-muted {
+  opacity: 0.35;
+}
+
+/* Zoom controls */
+.zoom-controls {
+  position: absolute;
+  bottom: 6px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(26, 27, 30, 0.9);
+  border: 1px solid #2a2b2e;
+  border-radius: 4px;
+  padding: 3px 8px;
+  z-index: 20;
+  pointer-events: all;
+}
+
+.zoom-btn {
+  background: transparent;
+  border: none;
+  color: #808080;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 3px;
+}
+.zoom-btn:hover { color: #00ffcc; background-color: rgba(0,255,204,0.1); }
+
+.zoom-label {
+  font-size: 10px;
+  color: #808080;
+  min-width: 32px;
+  text-align: center;
+  font-family: 'Consolas', monospace;
+}
+
+.region-name-bar {
+  height: 14px;
+  min-height: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  width: 100%;
+  z-index: 2;
+  position: relative;
+}
+
+.region-waveform {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 14px;
+  overflow: hidden;
+}
+
+/* Playback scan shimmer — moves left→right while transport is playing */
+.waveform-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 20%,
+    rgba(255,255,255,0.055) 42%,
+    rgba(255,255,255,0.12)  50%,
+    rgba(255,255,255,0.055) 58%,
+    transparent 80%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: waveform-scan 2.4s linear infinite;
+}
+
+@keyframes waveform-scan {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.timeline-ruler {
+  background-color: #2a2b2e;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.bar-ruler {
+  height: 36px;
+  border-bottom: 1px solid #1e1f22;
+  cursor: pointer;
+  background-color: #2a2b2e;
+  overflow: visible; /* allow playhead triangle to extend over time-ruler */
+  z-index: 2;
+}
+
+/* Playhead marker in bar-ruler extends into time-ruler (22px) so cursor
+   is visible across both ruler strips */
+.bar-ruler .playhead-marker {
+  height: calc(100% + 22px);
+}
+
+.time-ruler {
+  height: 22px;
+  border-bottom: 1px solid #1a1b1e;
+  cursor: default;
+  background-color: #212325;
+  z-index: 1;
+}
+
+/* ── Bar ruler ticks ──────────────────────────────── */
+.ruler-bar-group {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+
+/* Bar line + number */
+.ruler-bar-line {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background-color: #555;
+}
+
+.ruler-bar-label {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #b0b0b0;
+  font-family: 'Consolas', 'Courier New', monospace;
+  white-space: nowrap;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* Beat ticks inside a bar (beats 2, 3, 4) */
+.ruler-beat-tick {
+  position: absolute;
+  top: 60%;      /* start lower — shorter tick */
+  bottom: 0;
+  width: 1px;
+  background-color: #3e3f43;
+  pointer-events: none;
+}
+
+/* Half-bar tick (beat 3 when it's the midpoint) is slightly taller */
+.ruler-beat-tick.half {
+  top: 40%;
+  background-color: #484a4f;
+}
+
+/* ── Time ruler ticks ───────────────────────────── */
+.time-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  pointer-events: none;
+}
+
+.time-tick::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 45%;
+  background-color: #3a3b3f;
+}
+
+.time-tick-minute::before {
+  height: 65%;
+  background-color: #545660;
+}
+
+.time-tick-label {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  font-size: 9px;
+  color: #585a5e;
+  font-family: 'Consolas', 'Courier New', monospace;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.time-tick-minute .time-tick-label {
+  color: #7a7c84;
+}
+
+/* ── Playhead ───────────────────────────────────── */
+.playhead-marker {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 2px;
+  background-color: #00ffcc;
+  z-index: 10;
+  cursor: ew-resize;
+  box-shadow: 0 0 6px rgba(0, 255, 204, 0.5);
+}
+
+.playhead-triangle {
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 8px solid #00ffcc;
+  position: absolute;
+  left: -6px;
+  top: 0;
+  filter: drop-shadow(0 0 4px rgba(0, 255, 204, 0.7));
+}
+
+/* Time readout that appears below the triangle handle */
+.playhead-time-readout {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 8.5px;
+  font-weight: 600;
+  font-family: 'Roboto Mono', 'Courier New', monospace;
+  color: #00ffcc;
+  background: rgba(0, 0, 0, 0.75);
+  padding: 1px 4px;
+  border-radius: 2px;
+  pointer-events: none;
+  letter-spacing: 0.3px;
+}
+
+.arrange-content {
+  flex: 1;
+  position: relative;
+  overflow: auto;
+  min-width: 0;
+}
+
+.playhead-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: #00ffcc;
+  z-index: 10;
+  pointer-events: none;
+  box-shadow: 0 0 4px rgba(0, 255, 204, 0.35);
+}
+
+/* ── Magnetic snap guide ──────────────────────────────── */
+.snap-guide {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  pointer-events: none;
+  z-index: 48;
+}
+.snap-guide-grid     { background: rgba(255, 255, 255, 0.7);  box-shadow: 0 0 3px rgba(255,255,255,0.3); }
+.snap-guide-clipStart,
+.snap-guide-clipEnd  { background: rgba(0, 220, 180, 1);      box-shadow: 0 0 4px rgba(0,220,180,0.5); }
+.snap-guide-cursor   { background: rgba(255, 210, 50, 1);     box-shadow: 0 0 4px rgba(255,210,50,0.5); }
+.snap-guide-marker   { background: rgba(190, 120, 255, 1);    box-shadow: 0 0 4px rgba(190,120,255,0.5); }
+.snap-guide-loopIn,
+.snap-guide-loopOut  { background: rgba(60, 200, 80, 1);      box-shadow: 0 0 4px rgba(60,200,80,0.5); }
+.snap-guide-punchIn,
+.snap-guide-punchOut { background: rgba(255, 80, 80, 1);      box-shadow: 0 0 4px rgba(255,80,80,0.5); }
+
+/* Clip outline when magnetically locked to a snap target */
+.region-snapping {
+  box-shadow: 0 0 0 1.5px rgba(0, 220, 180, 0.85) inset, 0 0 6px rgba(0,220,180,0.25) !important;
+  z-index: 6 !important;
+}
+
+/* ── Reveal Hidden Audio edge indicators ──────────────────────────── */
+/* Small chevron triangles on clip edges when trimmed audio exists beyond */
+.hidden-audio-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 7;
+}
+.hidden-audio-left {
+  left: 2px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 6px solid rgba(255, 200, 50, 0.85);
+  filter: drop-shadow(0 0 2px rgba(255,200,50,0.5));
+}
+.hidden-audio-right {
+  right: 2px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid rgba(255, 200, 50, 0.85);
+  filter: drop-shadow(0 0 2px rgba(255,200,50,0.5));
+}
+
+/* Region under cursor — subtle highlight as playhead passes through */
+.region-under-cursor {
+  filter: brightness(1.35) !important;
+  outline: 1px solid rgba(0, 255, 204, 0.45);
+}
+
+.grid-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+}
+
+/* ── Infinite timeline: project-end visuals ──────────────────────── */
+
+.beyond-project-end {
+  position: absolute;
+  top: 0;
+  background: rgba(0, 0, 0, 0.3);
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Invisible drag target — wider hit area, only shows faint amber on hover */
+.project-end-marker {
+  position: absolute;
+  top: 0;
+  width: 10px;
+  background: transparent;
+  cursor: ew-resize;
+  z-index: 4;
+  transform: translateX(-5px);
+}
+
+.project-end-marker:hover,
+.project-end-marker:active {
+  background: rgba(255, 200, 60, 0.12);
+}
+
+/* END label hidden — boundary is communicated by the tinted area */
+.project-end-label {
+  display: none;
+}
+
+/* END flag in bar ruler — invisible line, text label only */
+.project-end-ruler-flag {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+
+.project-end-ruler-label {
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  transform: translateY(-50%);
+  color: rgba(255, 200, 60, 0.5);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.arrange-tracks {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.arrange-track {
+  height: 80px;
+  border-bottom: 1px solid #1a1b1e;
+  position: relative;
+}
+
+.audio-region, .midi-region {
+  position: absolute;
+  height: calc(100% - 10px);
+  top: 5px;
+  border: 1px solid;
+  border-radius: 2px;
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+}
+
+.audio-region:hover, .midi-region:hover {
+  filter: brightness(1.15);
+}
+
+.region-name {
+  font-size: 10px;
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+
+.waveform-mockup {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 40px;
+  transform: translateY(-50%);
+  background-image: linear-gradient(to right, transparent 2px, rgba(255,255,255,0.3) 2px, rgba(255,255,255,0.3) 4px);
+  background-size: 6px 100%;
+}
+
+/* ── Live recording region ──────────────────────────────────────── */
+.region-recording-live {
+  background-color: rgba(255, 60, 60, 0.13) !important;
+  border-color: #ff4d4d !important;
+  pointer-events: none;
+  z-index: 4;
+  animation: rec-border-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes rec-border-pulse {
+  0%,  100% { box-shadow: 0 0 0 0   rgba(255, 77, 77, 0.25); }
+  50%        { box-shadow: 0 0 8px 2px rgba(255, 77, 77, 0.45); }
+}
+
+.recording-live-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rec-blink-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #ff4d4d;
+  flex-shrink: 0;
+  animation: rec-dot-blink 1s step-end infinite;
+}
+
+@keyframes rec-dot-blink {
+  0%,  49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.midi-notes-mockup {
+  position: absolute;
+  top: 15px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image:
+    linear-gradient(to right, transparent 10px, rgba(255,255,255,0.6) 10px, rgba(255,255,255,0.6) 30px, transparent 30px),
+    linear-gradient(to bottom, transparent 4px, rgba(255,255,255,0.6) 4px, rgba(255,255,255,0.6) 8px, transparent 8px);
+  background-size: 50px 20px;
+}
+
+/* Region height follows track height */
+.audio-region, .midi-region {
+  height: calc(100% - 10px);
+}
+
+/* ── Vertical-drag cross-track ghost ────────────────── */
+.region-v-drag-ghost {
+  position: absolute;
+  top: 5px;
+  border: 2px dashed rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* ── New-track drop zone ────────────────────────────── */
+.new-track-drop-zone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 68px;
+  background-color: rgba(0, 255, 204, 0.04);
+  border: 1px dashed rgba(0, 255, 204, 0.35);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.new-track-drop-label {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(0, 255, 204, 0.7);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+/* ── Crossfade zone — explicit crossfade between two overlapping clips ── */
+.crossfade-zone {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  pointer-events: auto;
+  z-index: 4;
+  cursor: context-menu;
+  /* Classic X crossfade pattern — two diagonal gradients crossing */
+  background:
+    linear-gradient(to bottom-right, rgba(0, 220, 180, 0.28) 0%, transparent 50%),
+    linear-gradient(to top-right,    rgba(0, 220, 180, 0.28) 0%, transparent 50%);
+  border-left:  1px solid rgba(0, 220, 180, 0.55);
+  border-right: 1px solid rgba(0, 220, 180, 0.55);
+  border-radius: 2px;
+}
+
+/* ── Clip rename inline input ───────────────────────── */
+.region-rename-input {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  right: 4px;
+  height: 18px;
+  font-size: 10px;
+  font-family: inherit;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  border: 1px solid #00ffcc;
+  border-radius: 3px;
+  padding: 0 4px;
+  outline: none;
+  z-index: 10;
+}
+
+/* ── Slip editing indicator ─────────────────────────── */
+/* When Alt is held and a region is hovered the cursor switches to indicate slip */
+.audio-region.region-slipping {
+  cursor: ew-resize !important;
+  outline: 1px dashed rgba(0, 255, 204, 0.6);
+}
