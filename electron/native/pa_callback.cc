@@ -61,6 +61,12 @@ struct LevPacket  { float   l, r; };
 struct TrLPacket  { int n; float lr[64 * 2]; };
 struct EndPacket  { double  pos; };
 
+// ── Runtime diagnostics (atomic — read from audio thread, polled from V8 thread) ─
+// getDiag() returns these without locking; values are slightly racy but fine for logging.
+
+static std::atomic<uint64_t> gTotalCallbacks{0};   // never resets; proves callback is alive
+static std::atomic<uint64_t> gLastCbMs{0};          // milliseconds-since-epoch of last callback
+
 // ── Lock-free SPSC ring buffer (float samples, interleaved L/R) ───────────────
 // Size must be a power of 2. 1<<20 = 1M floats = 4MB = ~10.4s stereo @ 48kHz.
 
@@ -282,6 +288,13 @@ static int paCallback(
     Engine    &e   = gEng;
     float     *out = static_cast<float *>(out_);
     const int  n   = static_cast<int>(frames);
+
+    // ── Diagnostic counters — first thing in every callback invocation ──────────
+    gTotalCallbacks.fetch_add(1, std::memory_order_relaxed);
+    gLastCbMs.store(
+        (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count(),
+        std::memory_order_relaxed);
 
     if (e.shouldAbort.load(std::memory_order_relaxed)) {
         if (out) memset(out, 0, n * 2 * sizeof(float));
@@ -772,6 +785,26 @@ Napi::Value Dispose(const Napi::CallbackInfo &info) {
     return info.Env().Undefined();
 }
 
+// getDiag() → { totalCallbacks, lastCbMs, positionSecs, streamActive, isRecording }
+// Polls the atomic counters written by paCallback. Safe to call any time from V8 thread.
+Napi::Value GetDiag(const Napi::CallbackInfo &info) {
+    Napi::Env env = info.Env();
+    const uint64_t total   = gTotalCallbacks.load(std::memory_order_relaxed);
+    const uint64_t lastMs  = gLastCbMs.load(std::memory_order_relaxed);
+    const int64_t  posSmp  = gEng.position.load(std::memory_order_relaxed);
+    const bool     active  = gEng.active.load(std::memory_order_relaxed) != 0;
+    const bool     rec     = gEng.isRecording.load(std::memory_order_relaxed) != 0;
+    const int      sr      = gEng.sampleRate > 0 ? gEng.sampleRate : 48000;
+
+    Napi::Object r = Napi::Object::New(env);
+    r.Set("totalCallbacks", Napi::Number::New(env, (double)total));
+    r.Set("lastCbMs",       Napi::Number::New(env, (double)lastMs));
+    r.Set("positionSecs",   Napi::Number::New(env, (double)posSmp / sr));
+    r.Set("streamActive",   Napi::Boolean::New(env, active));
+    r.Set("isRecording",    Napi::Boolean::New(env, rec));
+    return r;
+}
+
 // ── Module init ───────────────────────────────────────────────────────────────
 
 static bool gPaInitialized = false;
@@ -792,6 +825,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("setTrackParam", Napi::Function::New(env, SetTrackParam));
     exports.Set("isActive",      Napi::Function::New(env, IsActive));
     exports.Set("dispose",       Napi::Function::New(env, Dispose));
+    exports.Set("getDiag",       Napi::Function::New(env, GetDiag));
 
     return exports;
 }

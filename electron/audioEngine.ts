@@ -216,6 +216,40 @@ export class NativeAudioEngine extends EventEmitter {
   private _auditFillCount = 0;  // counts _fill() calls; log every ~500 ms
   private _auditStopRequestedAt = 0; // Date.now() when stopPlayback() is called
 
+  // ── Callback diagnostic timer ─────────────────────────────────────────────
+  // Polls paAddon.getDiag() once per second and logs to main-process stdout.
+  // Proves the PortAudio callback is running continuously during playback/record.
+  private _diagTimer: NodeJS.Timeout | null = null;
+  private _diagPrevTotal = 0;
+
+  private _startDiagTimer() {
+    if (!paAddon || this._diagTimer) return;
+    this._diagPrevTotal = 0;
+    this._diagTimer = setInterval(() => {
+      try {
+        const d = paAddon.getDiag() as {
+          totalCallbacks: number; lastCbMs: number;
+          positionSecs: number;   streamActive: boolean; isRecording: boolean;
+        };
+        const cbsThisSec   = d.totalCallbacks - this._diagPrevTotal;
+        this._diagPrevTotal = d.totalCallbacks;
+        const ageMs = Date.now() - d.lastCbMs;
+        console.log(
+          `[pa_callback][diag] cbs/sec=${cbsThisSec}` +
+          `  pos=${d.positionSecs.toFixed(3)}s` +
+          `  active=${d.streamActive}` +
+          `  rec=${d.isRecording}` +
+          `  lastCbAge=${ageMs}ms` +
+          `  totalCbs=${d.totalCallbacks}`,
+        );
+      } catch {}
+    }, 1000);
+  }
+
+  private _stopDiagTimer() {
+    if (this._diagTimer) { clearInterval(this._diagTimer); this._diagTimer = null; }
+  }
+
   // ── Pending record (paAddon path) ─────────────────────────────────────────
   // startRecording() stores params here; startPlayback() detects the flag and
   // opens a single full-duplex ASIO stream for both recording and playback.
@@ -365,6 +399,7 @@ export class NativeAudioEngine extends EventEmitter {
             },
           );
           this._usingCbAddon = true;
+          this._startDiagTimer();
           this.emit('position', startTimeSecs);
           return;
         } catch (err) {
@@ -400,6 +435,7 @@ export class NativeAudioEngine extends EventEmitter {
           },
         );
         this._usingCbAddon = true;
+        this._startDiagTimer();
         this.emit('position', startTimeSecs);  // immediate cursor snap before first callback
         return;
       } catch (err) {
@@ -664,6 +700,7 @@ export class NativeAudioEngine extends EventEmitter {
         // Leave inputLevels live — recording is still active.
         return;
       }
+      this._stopDiagTimer();
       const finalPosSamples = paAddon.getPosition() as number;
       paAddon.abort();   // Pa_AbortStream — no drain, silence immediately
       this._usingCbAddon = false;
@@ -902,6 +939,7 @@ export class NativeAudioEngine extends EventEmitter {
 
     // ── paAddon path ────────────────────────────────────────────────────────
     if (this._usingCbAddon && paAddon) {
+      this._stopDiagTimer();
       this.recording     = false;
       this._usingCbAddon = false;
       this.playing       = false;

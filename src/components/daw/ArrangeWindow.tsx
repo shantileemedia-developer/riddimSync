@@ -826,6 +826,23 @@ const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
         );
       }
 
+      // Per-second render diagnostic during recording — proves RAF sees recording state
+      // and that all DOM refs are populated and receiving updates
+      if (isRecordingRef.current && _auditRafCnt % 60 === 0) {
+        const recDur = Math.max(0, currentTimeRef.current - recordingStartTimeRef.current);
+        console.log(
+          `[AUDIT][RAF][recording]` +
+          ` cur=${currentTimeRef.current.toFixed(3)}s` +
+          ` recStart=${recordingStartTimeRef.current.toFixed(3)}s` +
+          ` dur=${recDur.toFixed(3)}s` +
+          ` lineLeft=${playheadLineRef.current?.style.left ?? 'NO_REF'}` +
+          ` liveW=${liveRegionRef.current?.style.width ?? 'NO_REF(not_armed?)'}` +
+          ` rafRunning=true` +
+          ` playing=${isPlayingRef.current}` +
+          ` recording=${isRecordingRef.current}`,
+        );
+      }
+
       if (playing && !wasPlayingRef.current) {
         // Play just started — anchor to current IPC position and local wall clock.
         posSnapRef.current  = ipcPos;
