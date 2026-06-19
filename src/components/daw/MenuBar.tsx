@@ -569,7 +569,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
 
     // In Electron, a project Audio folder is required — imported audio must be saved to disk
     const nativeAudioDir = localStorage.getItem('sd_audioDirPath');
-    if (window.studioRC?.writeFile && !nativeAudioDir) {
+    if (window.studioRC && !nativeAudioDir) {
       toast('Open or create a project folder before importing audio.');
       return;
     }
