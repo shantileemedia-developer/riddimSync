@@ -145,6 +145,10 @@ const MenuBar: React.FC<MenuBarProps> = ({
         } else if (dirPath) {
           json     = await window.studioProject!.load(dirPath);
           audioDir = await window.studioProject!.setup(dirPath).catch(() => null);
+          if (audioDir) {
+            setAudioDirPath(audioDir);
+            localStorage.setItem('sd_audioDirPath', audioDir);
+          }
         } else return;
 
         const saved = JSON.parse(json);
@@ -428,6 +432,8 @@ const MenuBar: React.FC<MenuBarProps> = ({
         }
         const saved = JSON.parse(json);
         const audioDir = await window.studioProject.setup(dir);
+        setAudioDirPath(audioDir);
+        localStorage.setItem('sd_audioDirPath', audioDir);
 
         const { urlMap, missing } = await restoreAudioFiles(saved.poolItems ?? [], audioDir);
         applyUrlMap(saved, urlMap);
@@ -561,69 +567,74 @@ const MenuBar: React.FC<MenuBarProps> = ({
       fileName = result.name;
     }
 
-    console.log('[IMPORT 1] Import start — file:', fileName, 'rawBuffer bytes:', rawBuffer.byteLength);
+    // In Electron, a project Audio folder is required — imported audio must be saved to disk
+    const nativeAudioDir = localStorage.getItem('sd_audioDirPath');
+    if (window.studioRC?.writeFile && !nativeAudioDir) {
+      toast('Open or create a project folder before importing audio.');
+      return;
+    }
+
     const importBlob = new Blob([rawBuffer]);
-    const url = URL.createObjectURL(importBlob);
     try {
       const rawPrefs = localStorage.getItem('riddimSync_audio_prefs');
       const projectSR: number = rawPrefs ? (JSON.parse(rawPrefs).sampleRate ?? 48000) : 48000;
       const actx = new AudioContext({ sampleRate: projectSR });
       const buf = await actx.decodeAudioData(rawBuffer.slice(0));
       const duration = buf.duration;
-      console.log('[IMPORT 2] Audio decoded — duration:', duration, 'channels:', buf.numberOfChannels, 'samples:', buf.length);
       const { left: peaks, right: rawPeaksR } = await generatePeaksStereo(buf);
       await actx.close();
-      console.log('[IMPORT 3] Waveform generated — left peaks:', peaks.length, 'right peaks:', rawPeaksR?.length ?? 0);
       const poolItemId = `pool_${Date.now()}`;
       const name = fileName.replace(/\.[^.]+$/, '');
+      const wavName = `${name}.wav`;
 
-      // Write converted WAV to the project Audio folder (native Electron path)
-      let savedLocalFileName: string | undefined;
-      const nativeAudioDir = localStorage.getItem('sd_audioDirPath');
+      // Write decoded WAV to ProjectFolder/Audio — required for project portability
+      let fullPath: string | undefined;
       if (nativeAudioDir && window.studioRC?.writeFile) {
+        const frames = buf.length;
+        const sr = buf.sampleRate;
+        const L = buf.getChannelData(0);
+        const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+        const wav = new ArrayBuffer(44 + frames * 8);
+        const dv = new DataView(wav);
+        const ws = (off: number, s: string) => s.split('').forEach((c, i) => dv.setUint8(off + i, c.charCodeAt(0)));
+        ws(0, 'RIFF'); dv.setUint32(4, 36 + frames * 8, true);
+        ws(8, 'WAVE');
+        ws(12, 'fmt '); dv.setUint32(16, 16, true);
+        dv.setUint16(20, 3, true); dv.setUint16(22, 2, true);
+        dv.setUint32(24, sr, true); dv.setUint32(28, sr * 8, true);
+        dv.setUint16(32, 8, true); dv.setUint16(34, 32, true);
+        ws(36, 'data'); dv.setUint32(40, frames * 8, true);
+        const f32 = new Float32Array(wav, 44);
+        for (let i = 0; i < frames; i++) { f32[i * 2] = L[i]; f32[i * 2 + 1] = R[i]; }
+        const sep = nativeAudioDir.includes('\\') ? '\\' : '/';
         try {
-          const wavName = `${name}.wav`;
-          const frames = buf.length;
-          const sr = buf.sampleRate;
-          const L = buf.getChannelData(0);
-          const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
-          const wav = new ArrayBuffer(44 + frames * 8);
-          const dv = new DataView(wav);
-          const ws = (off: number, s: string) => s.split('').forEach((c, i) => dv.setUint8(off + i, c.charCodeAt(0)));
-          ws(0, 'RIFF'); dv.setUint32(4, 36 + frames * 8, true);
-          ws(8, 'WAVE');
-          ws(12, 'fmt '); dv.setUint32(16, 16, true);
-          dv.setUint16(20, 3, true); dv.setUint16(22, 2, true);
-          dv.setUint32(24, sr, true); dv.setUint32(28, sr * 8, true);
-          dv.setUint16(32, 8, true); dv.setUint16(34, 32, true);
-          ws(36, 'data'); dv.setUint32(40, frames * 8, true);
-          const f32 = new Float32Array(wav, 44);
-          for (let i = 0; i < frames; i++) { f32[i * 2] = L[i]; f32[i * 2 + 1] = R[i]; }
-          const sep = nativeAudioDir.includes('\\') ? '\\' : '/';
           await window.studioRC.writeFile(nativeAudioDir + sep + wavName, wav);
-          savedLocalFileName = wavName;
-          console.log('[IMPORT] Saved to project Audio folder:', wavName);
-        } catch (err) { console.error('[IMPORT] Audio folder save failed:', err); }
+          fullPath = nativeAudioDir + sep + wavName;
+        } catch (err) {
+          console.error('[IMPORT] Audio folder write failed:', err);
+          toast('Import failed: could not write audio to project folder.');
+          return;
+        }
       }
+
+      // file:// URL is portable and gets stripped on save; localFileName is used to reload from disk
+      const audioUrl = fullPath ? `file://${fullPath}` : URL.createObjectURL(importBlob);
 
       const poolItem: PoolItem = {
         id: poolItemId,
         name,
-        audioUrl: url,
-        localFileName: savedLocalFileName ?? fileName,
+        audioUrl,
+        localFileName: wavName,
         duration,
         createdAt: new Date(),
         waveformPeaks: peaks,
         waveformPeaksR: rawPeaksR,
       };
-      console.log('[IMPORT 4] Dispatching ADD_POOL_ITEM — id:', poolItemId);
       dispatch({ type: 'ADD_POOL_ITEM', payload: poolItem });
-      console.log('[IMPORT 5] ADD_POOL_ITEM dispatched');
       if (state.selectedTrackId) {
         const track = state.tracks.find(t => t.id === state.selectedTrackId);
         if (track) {
           const peaksR = track.type === 'stereo' ? rawPeaksR : null;
-          console.log('[IMPORT 6] Dispatching ADD_REGION — track:', track.id, 'selectedTrackId present');
           dispatch({
             type: 'ADD_REGION',
             payload: {
@@ -634,32 +645,24 @@ const MenuBar: React.FC<MenuBarProps> = ({
               startTime: currentTimeRef.current,
               duration,
               name,
-              audioUrl: url,
+              audioUrl,
               waveformPeaks: peaks,
               waveformPeaksR: peaksR,
               sourceDuration: duration,
               sourcePeaks: peaks,
               sourcePeaksR: rawPeaksR,
+              ...(fullPath ? { localFilePath: fullPath } : {}),
             },
           });
-          console.log('[IMPORT 7] ADD_REGION dispatched');
         }
-      } else {
-        console.log('[IMPORT 6] No track selected — skipping ADD_REGION');
       }
       if (audioDirHandle) {
         try { await saveToAudioFolder(audioDirHandle, name, buf); } catch (err) { console.error('Audio folder save failed:', err); }
       }
       toast(`Imported: ${name}`);
-      console.log('[IMPORT 8] Starting Supabase upload — blob size:', importBlob.size);
       uploadAudioToSupabase(importBlob, fileName)
-        .then(({ publicUrl }) => {
-          console.log('[IMPORT 9] Upload complete — dispatching UPDATE_AUDIO_URLS, publicUrl:', publicUrl);
-          dispatch({ type: 'UPDATE_AUDIO_URLS', payload: { poolItemId, audioUrl: publicUrl } });
-          console.log('[IMPORT 10] UPDATE_AUDIO_URLS dispatched');
-        })
+        .then(({ publicUrl }) => dispatch({ type: 'UPDATE_AUDIO_URLS', payload: { poolItemId, audioUrl: publicUrl } }))
         .catch(err => console.error('[IMPORT ERROR] Supabase upload failed:', err));
-      console.log('[IMPORT DONE] All sync dispatches complete — upload running in background');
     } catch (err) { console.error('[IMPORT ERROR] Decode failed:', err); toast('Could not decode audio file.'); }
   }, [isEngineer, onSendRemoteCommand, dispatch, state.selectedTrackId, state.tracks, currentTimeRef, audioDirHandle, toast]);
 
