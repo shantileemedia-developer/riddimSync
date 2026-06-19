@@ -216,6 +216,16 @@ export class NativeAudioEngine extends EventEmitter {
   private _auditFillCount = 0;  // counts _fill() calls; log every ~500 ms
   private _auditStopRequestedAt = 0; // Date.now() when stopPlayback() is called
 
+  // ── Pending record (paAddon path) ─────────────────────────────────────────
+  // startRecording() stores params here; startPlayback() detects the flag and
+  // opens a single full-duplex ASIO stream for both recording and playback.
+  private _pendingRecord        = false;
+  private _pendingRecPath       = '';
+  private _pendingRecInDevId    = -1;
+  private _pendingRecOutDevId   = -1;
+  private _pendingRecSr         = ENGINE_SR;
+  private _pendingRecStartDawPos = 0;
+
   // ── ASIO callback diagnostics ──────────────────────────────────────────────
   // Counters reset on each startPlayback(); per-second window resets each log.
   private _diagCbTotal         = 0;   // total _fill() invocations this session
@@ -329,6 +339,45 @@ export class NativeAudioEngine extends EventEmitter {
       });
       this._cbTrackIds = runtimes.map(rt => rt.spec.trackId);
 
+      // ── Full-duplex record + play ────────────────────────────────────────────
+      if (this._pendingRecord) {
+        this._pendingRecord = false;
+        try {
+          paAddon.record(
+            this._pendingRecInDevId,
+            outDeviceId,
+            sr,
+            startSample,
+            this._pendingRecPath,
+            trackData,
+            (pos: number)     => { this.emit('position', pos); },
+            (levels: number[]) => { this.emit('levels', levels); },
+            (flat: number[])  => {
+              const map: Record<string, [number, number]> = {};
+              for (let i = 0; i < this._cbTrackIds.length; i++) {
+                map[this._cbTrackIds[i]] = [flat[i * 2] ?? 0, flat[i * 2 + 1] ?? 0];
+              }
+              this.emit('trackLevels', map);
+            },
+            (levels: number[]) => { this.emit('inputLevels', levels); },
+            (_endPos: number)  => {
+              // Recording sessions don't auto-end — ignoring; stopRecord() controls teardown.
+            },
+          );
+          this._usingCbAddon = true;
+          this.emit('position', startTimeSecs);
+          return;
+        } catch (err) {
+          console.error('[AudioEngine] pa_callback.record() failed:', err);
+          this._usingCbAddon = false;
+          this._cbTrackIds   = [];
+          this.recording     = false;
+          this.emit('error', `Record+play failed: ${(err as Error).message}`);
+          return;
+        }
+      }
+
+      // ── Playback-only ────────────────────────────────────────────────────────
       try {
         paAddon.play(
           outDeviceId, sr, startSample, trackData,
@@ -357,12 +406,6 @@ export class NativeAudioEngine extends EventEmitter {
         console.error('[AudioEngine] pa_callback.play() failed:', err);
         this._usingCbAddon = false;
         this._cbTrackIds   = [];
-        if (this.recording) {
-          // ASIO exclusive: input is open for recording; output can't open simultaneously.
-          // Position is driven by the recording data handler — no fill timer needed.
-          this.emit('position', startTimeSecs);
-          return;
-        }
       }
     }
 
@@ -608,6 +651,19 @@ export class NativeAudioEngine extends EventEmitter {
   stopPlayback() {
     // ── Callback-addon path ────────────────────────────────────────────────────
     if (this._usingCbAddon && paAddon) {
+      if (this.recording) {
+        // Recording owns the full-duplex stream — stopRecording() will call
+        // paAddon.stopRecord() which aborts the stream and patches the WAV.
+        // All we do here is mark playing=false and zero play meters.
+        this.playing       = false;
+        this._cbTrackIds   = [];
+        const zeroTracks: Record<string, [number, number]> = {};
+        for (const rt of this.tracks) zeroTracks[rt.spec.trackId] = [0, 0];
+        if (Object.keys(zeroTracks).length > 0) this.emit('trackLevels', zeroTracks);
+        this.emit('levels', [0, 0]);
+        // Leave inputLevels live — recording is still active.
+        return;
+      }
       const finalPosSamples = paAddon.getPosition() as number;
       paAddon.abort();   // Pa_AbortStream — no drain, silence immediately
       this._usingCbAddon = false;
@@ -741,6 +797,19 @@ export class NativeAudioEngine extends EventEmitter {
     // Ensure directory exists
     await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
 
+    // ── paAddon path: defer stream open to startPlayback() ────────────────────
+    // The C++ addon opens the full-duplex ASIO stream (input + output) once it
+    // has the decoded track data. We store params here and bail out early.
+    if (paAddon) {
+      this._pendingRecord         = true;
+      this._pendingRecPath        = filePath;
+      this._pendingRecInDevId     = inDeviceId;
+      this._pendingRecOutDevId    = outDeviceId;
+      this._pendingRecSr          = sr;
+      this._pendingRecStartDawPos = startDawPosition;
+      return;
+    }
+
     // Write placeholder WAV header (sizes patched on stop)
     this.recWs = fs.createWriteStream(filePath);
     this.recWs.write(makeWavHeader(sr, numCh));
@@ -821,7 +890,40 @@ export class NativeAudioEngine extends EventEmitter {
   }
 
   async stopRecording(): Promise<{ filePath: string; duration: number } | null> {
-    if (!this.recording) return null;
+    if (!this.recording && !this._pendingRecord) return null;
+
+    // Cancelled before startPlayback() was even called.
+    if (this._pendingRecord) {
+      this._pendingRecord = false;
+      this.recording      = false;
+      this.emit('inputLevels', [0, 0]);
+      return null;
+    }
+
+    // ── paAddon path ────────────────────────────────────────────────────────
+    if (this._usingCbAddon && paAddon) {
+      this.recording     = false;
+      this._usingCbAddon = false;
+      this.playing       = false;
+      this._cbTrackIds   = [];
+      try {
+        const result = await (paAddon.stopRecord() as Promise<{ filePath: string; duration: number }>);
+        this.emit('inputLevels', [0, 0]);
+        this.emit('levels', [0, 0]);
+        const zeroTracks: Record<string, [number, number]> = {};
+        for (const rt of this.tracks) zeroTracks[rt.spec.trackId] = [0, 0];
+        if (Object.keys(zeroTracks).length > 0) this.emit('trackLevels', zeroTracks);
+        this.liveParams.clear();
+        if (this._micBusSubs > 0 && !this.inStream) this._openMicBusStream(this.inDeviceId);
+        return result;
+      } catch (err) {
+        console.error('[AudioEngine] paAddon.stopRecord() failed:', err);
+        this.emit('inputLevels', [0, 0]);
+        return null;
+      }
+    }
+
+    // ── naudiodon path ───────────────────────────────────────────────────────
     this.recording = false;
 
     if (this.inStream) {
