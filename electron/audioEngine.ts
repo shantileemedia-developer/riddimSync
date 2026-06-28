@@ -442,10 +442,14 @@ export class NativeAudioEngine extends EventEmitter {
         console.error('[AudioEngine] pa_callback.play() failed:', err);
         this._usingCbAddon = false;
         this._cbTrackIds   = [];
+        // paAddon is present but threw — surface the error instead of silently
+        // degrading to the push-mode path, which has different timing guarantees.
+        this.emit('error', `pa_callback play failed: ${(err as Error).message}`);
+        return;
       }
     }
 
-    // ── Push-mode fallback (WASAPI / no addon) ────────────────────────────────
+    // ── Push-mode fallback (WASAPI / no addon, paAddon not compiled) ─────────
     this._usingCbAddon = false;
 
     // Anchor wall-clock so _fill() can rate-limit writes

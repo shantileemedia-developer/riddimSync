@@ -2318,14 +2318,18 @@ const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
                     />
                   )}
 
-                  {/* Live recording region — grows in real-time via RAF */}
-                  {state.transport.isRecording && track.isArmed && (
+                  {/* Live recording region — mounted whenever the track is armed so
+                      liveRegionRef is never null when recording starts (avoids the
+                      race between isRecordingRef going true and React processing the
+                      SET_RECORDING dispatch that would otherwise hide this element). */}
+                  {track.isArmed && (
                     <div
                       ref={liveRegionRef}
                       className="audio-region region-recording-live"
                       style={{
                         left: recordingStartTimeRef.current * pxPerSec,
                         width: 4,
+                        display: state.transport.isRecording ? undefined : 'none',
                       }}
                     >
                       <span className="region-name recording-live-label">
