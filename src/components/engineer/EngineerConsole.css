@@ -137,6 +137,19 @@
 }
 .ec-signout-btn:hover { color: #e2e8f0; border-color: #334155; }
 
+.ec-admin-btn {
+  font-size: 12px;
+  color: #a78bfa;
+  background: none;
+  border: 1px solid #4c1d95;
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ec-admin-btn:hover { background: #4c1d95; color: #ede9fe; }
+
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 .ec-btn {
   display: inline-flex;

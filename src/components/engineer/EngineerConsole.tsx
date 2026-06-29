@@ -274,6 +274,8 @@ export default function EngineerConsole({ userId, isAdmin, onOpenAdmin }: Props)
         isInSession={isInSession}
         phase={phase}
         onSignOut={async () => { await supabase.auth.signOut(); window.location.reload(); }}
+        isAdmin={isAdmin}
+        onOpenAdmin={onOpenAdmin}
       />
 
       <div className="ec-body">
@@ -359,13 +361,15 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 function ConsoleNav({
-  activeTab, onTabChange, isInSession, phase, onSignOut,
+  activeTab, onTabChange, isInSession, phase, onSignOut, isAdmin, onOpenAdmin,
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
   isInSession: boolean;
   phase: Phase;
   onSignOut: () => void;
+  isAdmin?: boolean;
+  onOpenAdmin?: () => void;
 }) {
   return (
     <nav className="ec-nav">
@@ -395,6 +399,11 @@ function ConsoleNav({
               {phase === 'waiting' ? 'Waiting for Artist' : 'Artist Connected'}
             </span>
           </div>
+        )}
+        {isAdmin && (
+          <button className="ec-admin-btn" onClick={onOpenAdmin} title="Admin — Manage Signup Codes">
+            Admin
+          </button>
         )}
         <button className="ec-signout-btn" onClick={onSignOut}>Sign Out</button>
       </div>
