@@ -405,6 +405,8 @@ engine.on('trackLevels', (levels: Record<string, [number, number]>) => {
 engine.on('ended',       (t: number)   => sendToRenderer('audio:ended',       t));
 engine.on('error',       (m: string)   => sendToRenderer('audio:error',       m));
 engine.on('unavailable', ()            => sendToRenderer('audio:unavailable'));
+engine.on('recProgress', (data: { recordedFrames: number; newPeaks: number[] }) =>
+  sendToRenderer('audio:recProgress', data));
 // Forward bus chunks to renderer (timing-critical — no throttle)
 engine.on('busChunk', (busId: string, chunk: Buffer) =>
   sendToRenderer('audio:busChunk', busId, chunk));
@@ -439,8 +441,8 @@ ipcMain.handle('audio:setTrackParams', (_e, trackId: string, params: any) =>
 
 ipcMain.handle('audio:getTakePath', (_e, name: string) => NativeAudioEngine.getTakePath(name));
 
-ipcMain.handle('audio:startRecording', async (_e, filePath, inId, outId, sr, numCh, startDawPos) => {
-  await engine.startRecording(filePath, inId ?? -1, outId ?? -1, sr ?? 48000, numCh ?? 2, startDawPos ?? 0);
+ipcMain.handle('audio:startRecording', async (_e, filePath, inId, outId, sr, numCh, startDawPos, inputChOffset) => {
+  await engine.startRecording(filePath, inId ?? -1, outId ?? -1, sr ?? 48000, numCh ?? 2, startDawPos ?? 0, inputChOffset ?? 0);
 });
 ipcMain.handle('audio:stopRecording', () => engine.stopRecording());
 

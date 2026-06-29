@@ -40,8 +40,8 @@ contextBridge.exposeInMainWorld('audioEngine', {
 
   // Recording
   getTakePath: (name: string): Promise<string> => ipcRenderer.invoke('audio:getTakePath', name),
-  startRecording: (filePath: string, inId?: number, outId?: number, sr?: number, numCh?: number, startDawPos?: number): Promise<void> =>
-    ipcRenderer.invoke('audio:startRecording', filePath, inId, outId, sr, numCh, startDawPos),
+  startRecording: (filePath: string, inId?: number, outId?: number, sr?: number, numCh?: number, startDawPos?: number, inputChOffset?: number): Promise<void> =>
+    ipcRenderer.invoke('audio:startRecording', filePath, inId, outId, sr, numCh, startDawPos, inputChOffset),
   stopRecording: (): Promise<{ filePath: string; duration: number } | null> =>
     ipcRenderer.invoke('audio:stopRecording'),
 
@@ -74,6 +74,11 @@ contextBridge.exposeInMainWorld('audioEngine', {
   onEnded:       (cb: (t: number) => void)    => { const h = (_: IpcRendererEvent, t: number)    => cb(t);    ipcRenderer.on('audio:ended',       h); return () => ipcRenderer.off('audio:ended',       h); },
   onError:       (cb: (m: string) => void)    => { const h = (_: IpcRendererEvent, m: string)    => cb(m);    ipcRenderer.on('audio:error',       h); return () => ipcRenderer.off('audio:error',       h); },
   onUnavailable: (cb: () => void)             => { const h = () => cb();                                       ipcRenderer.on('audio:unavailable', h); return () => ipcRenderer.off('audio:unavailable', h); },
+  onRecProgress: (cb: (data: { recordedFrames: number; newPeaks: number[] }) => void) => {
+    const h = (_: IpcRendererEvent, data: { recordedFrames: number; newPeaks: number[] }) => cb(data);
+    ipcRenderer.on('audio:recProgress', h);
+    return () => ipcRenderer.off('audio:recProgress', h);
+  },
 });
 
 // ── Email Bridge ─────────────────────────────────────────────────────────────

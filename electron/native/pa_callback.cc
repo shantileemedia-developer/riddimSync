@@ -61,6 +61,14 @@ struct LevPacket  { float   l, r; };
 struct TrLPacket  { int n; float lr[64 * 2]; };
 struct EndPacket  { double  pos; };
 
+// One progress event fired from the write thread every DISPATCH_EVERY ring pops.
+// peaks[] contains new peak values (one per ring-pop) since the last dispatch.
+struct RecProgressPacket {
+    int64_t recordedFrames;  // total stereo frames written so far
+    int     numPeaks;
+    float   peaks[128];
+};
+
 // ── Runtime diagnostics (atomic — read from audio thread, polled from V8 thread) ─
 // getDiag() returns these without locking; values are slightly racy but fine for logging.
 
@@ -171,8 +179,10 @@ static struct Engine {
     Napi::ThreadSafeFunction tsfTrLev;
     Napi::ThreadSafeFunction tsfEnded;
     Napi::ThreadSafeFunction tsfInputLevels;
-    bool tsfCreated         = false;
-    bool tsfInputLevCreated = false;
+    Napi::ThreadSafeFunction tsfRecProgress;
+    bool tsfCreated            = false;
+    bool tsfInputLevCreated    = false;
+    bool tsfRecProgressCreated = false;
 
     // Must be called from V8 thread only.
     void releaseTsfns() {
@@ -186,6 +196,10 @@ static struct Engine {
         if (tsfInputLevCreated) {
             tsfInputLevels.Release();
             tsfInputLevCreated = false;
+        }
+        if (tsfRecProgressCreated) {
+            tsfRecProgress.Release();
+            tsfRecProgressCreated = false;
         }
     }
 
@@ -235,6 +249,39 @@ static struct Engine {
 
 static void writeThreadFn() {
     float tbuf[4096];
+
+    // Peak accumulation — all state is write-thread-private; no locking needed.
+    // One peak value is stored per ring pop (each pop ≈ one audio callback ≈ 10ms).
+    // Every DISPATCH_EVERY peaks we fire tsfRecProgress on the V8 thread.
+    const int DISPATCH_EVERY = 10;   // ~100ms between progress events @ 48kHz
+    float     peakBuf[128];
+    int       peakBufCount   = 0;
+    int64_t   totalFrames    = 0;    // cumulative stereo frames written
+
+    auto dispatchPeaks = [&]() -> void {
+        if (!gEng.tsfRecProgressCreated || peakBufCount == 0) {
+            peakBufCount = 0;
+            return;
+        }
+        auto *pkt = new RecProgressPacket{};
+        pkt->recordedFrames = totalFrames;
+        pkt->numPeaks       = peakBufCount;
+        memcpy(pkt->peaks, peakBuf, peakBufCount * sizeof(float));
+        peakBufCount = 0;
+        // NonBlockingCall is safe from any std::thread — the TSFN is designed for this.
+        gEng.tsfRecProgress.NonBlockingCall(pkt,
+            [](Napi::Env env, Napi::Function cb, RecProgressPacket *d) {
+                Napi::Array arr = Napi::Array::New(env, d->numPeaks);
+                for (int i = 0; i < d->numPeaks; i++)
+                    arr.Set((uint32_t)i, Napi::Number::New(env, (double)d->peaks[i]));
+                Napi::Object obj = Napi::Object::New(env);
+                obj.Set("recordedFrames", Napi::Number::New(env, (double)d->recordedFrames));
+                obj.Set("newPeaks", arr);
+                cb.Call({obj});
+                delete d;
+            });
+    };
+
     while (!gEng.writeThreadStop.load(std::memory_order_relaxed)) {
         int got = gEng.ring.pop(tbuf, 4096);
         if (got > 0) {
@@ -251,6 +298,17 @@ static void writeThreadFn() {
                 fwrite(b, 1, 3, gEng.recFile);
             }
             gEng.recBytesWritten += (uint64_t)got * 3;
+
+            // Compute peak of L channel (index 0, 2, 4, …) for this chunk.
+            int sf = got / 2;
+            totalFrames += sf;
+            float peak = 0.f;
+            for (int i = 0; i < sf; i++) {
+                float s = fabsf(tbuf[i * 2]);
+                if (s > peak) peak = s;
+            }
+            if (peakBufCount < 128) peakBuf[peakBufCount++] = peak;
+            if (peakBufCount >= DISPATCH_EVERY) dispatchPeaks();
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -271,7 +329,17 @@ static void writeThreadFn() {
             fwrite(b, 1, 3, gEng.recFile);
         }
         gEng.recBytesWritten += (uint64_t)got * 3;
+
+        int sf = got / 2;
+        totalFrames += sf;
+        float peak = 0.f;
+        for (int i = 0; i < sf; i++) {
+            float s = fabsf(tbuf[i * 2]);
+            if (s > peak) peak = s;
+        }
+        if (peakBufCount < 128) peakBuf[peakBufCount++] = peak;
     }
+    dispatchPeaks();  // flush any remaining peaks before the write thread exits
 }
 
 // ── PortAudio callback ────────────────────────────────────────────────────────
@@ -651,6 +719,15 @@ Napi::Value Record(const Napi::CallbackInfo &info) {
     if (info.Length() >= 12 && info[11].IsNumber())
         chOffset = info[11].As<Napi::Number>().Int32Value();
     if (chOffset < 0) chOffset = 0;
+
+    // Optional 13th arg: onRecProgress callback — fired from the write thread
+    // every ~100ms with new peak values for the live waveform display.
+    // If omitted, peak accumulation still runs but no TSFN is fired.
+    if (info.Length() >= 13 && info[12].IsFunction()) {
+        gEng.tsfRecProgress = Napi::ThreadSafeFunction::New(
+            env, info[12].As<Napi::Function>(), "pa:recprog", 0, 1);
+        gEng.tsfRecProgressCreated = true;
+    }
 
     gEng.teardown();
     gEng.sampleRate          = sampleRate;

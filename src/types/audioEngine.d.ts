@@ -61,6 +61,7 @@ export interface AudioEngineAPI {
   onEnded(cb: (t: number) => void):      () => void;
   onError(cb: (m: string) => void):      () => void;
   onUnavailable(cb: () => void):         () => void;
+  onRecProgress(cb: (data: { recordedFrames: number; newPeaks: number[] }) => void): () => void;
 }
 
 declare global {

@@ -515,8 +515,9 @@ export const useNativeAudioEngine = () => {
     });
 
     const offInputLevels = eng()!.onInputLevels((l: number[]) => {
-      // Input levels: update livePeaks for recording indicator
-      if (l.length >= 1) livePeaksRef.current = [l[0]];
+      // Input levels: update livePeaks only when NOT recording (during recording
+      // peaks are accumulated from onRecProgress events instead).
+      if (!isRecordingNativeRef.current && l.length >= 1) livePeaksRef.current = [l[0]];
     });
 
     const offErr = eng()!.onError((msg: string) => {
@@ -646,10 +647,15 @@ export const useNativeAudioEngine = () => {
 
   const recordingStartDawTimeRef = useRef(0);
   const armedTrackIdRef          = useRef<string | null>(null);
+  const isRecordingNativeRef     = useRef(false);
+  const unsubRecProgressRef      = useRef<(() => void) | null>(null);
 
   const stopRecordingSession = useCallback(async () => {
     if (!isRecordingRef.current) return;
-    isRecordingRef.current = false;
+    isRecordingRef.current       = false;
+    isRecordingNativeRef.current = false;
+    unsubRecProgressRef.current?.();
+    unsubRecProgressRef.current  = null;
     console.log('[REC 1] stopRecordingSession — stopping native engine');
     dispatch({ type: 'SET_RECORDING', payload: false });
 
@@ -735,6 +741,15 @@ export const useNativeAudioEngine = () => {
     recordingStartDawTimeRef.current = currentTimeRef.current;
     recordingStartTimeRef.current    = currentTimeRef.current;
     livePeaksRef.current             = [];
+    isRecordingNativeRef.current     = true;
+
+    // Subscribe to live waveform peaks from the write thread.
+    // Each event delivers new peak values to append; the RAF in ArrangeWindow
+    // reads livePeaksRef and redraws the growing waveform clip.
+    unsubRecProgressRef.current?.();  // clear any stale sub from a prior take
+    unsubRecProgressRef.current = eng()!.onRecProgress(({ newPeaks }) => {
+      for (const p of newPeaks) livePeaksRef.current.push(p);
+    });
 
     const trackName = armedTrack.name;
     const takeNum   = state.poolItems.filter(p => p.name.startsWith(trackName)).length + 1;

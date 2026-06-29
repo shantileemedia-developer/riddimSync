@@ -400,6 +400,9 @@ export class NativeAudioEngine extends EventEmitter {
               // Recording sessions don't auto-end — stopRecord() controls teardown.
             },
             this._pendingRecChOffset,  // 12th arg: 0-indexed input channel
+            (data: { recordedFrames: number; newPeaks: number[] }) => {
+              this.emit('recProgress', data);
+            },                         // 13th arg: live waveform peak callback
           );
           this._usingCbAddon = true;
           this._startDiagTimer();
