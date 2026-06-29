@@ -29,6 +29,7 @@ function App() {
     (localStorage.getItem('sl_role') as 'artist' | 'engineer') || null
   );
   const [session, setSession] = useState<any>(null);
+  const [displayName, setDisplayName] = useState<string>('');
   const [roomCode, setRoomCode] = useState<string | null>(() =>
     localStorage.getItem('sl_room')
   );
@@ -52,6 +53,7 @@ function App() {
 
         setSession(data.session);
         setIsAdmin(isAdminUser);
+        setDisplayName(meta.display_name || u.email?.split('@')[0] || '');
 
         if (sessionRole) {
           setUserRole(sessionRole);
@@ -94,6 +96,8 @@ function App() {
     setSession(activeSession);
     localStorage.setItem('sl_role', role);
     setIsAdmin(activeSession.user.app_metadata?.is_admin === true);
+    const meta = activeSession.user.user_metadata ?? {};
+    setDisplayName(meta.display_name || activeSession.user.email?.split('@')[0] || '');
 
     if (role === 'artist') {
       getMyArtistCode(activeSession.user.id).then(code => {
@@ -164,6 +168,7 @@ function App() {
         )}
         <EngineerConsole
           userId={session.user.id}
+          displayName={displayName}
           isAdmin={isAdmin}
           onOpenAdmin={() => setShowAdminPanel(true)}
         />

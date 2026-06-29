@@ -32,6 +32,7 @@ interface SessionHistoryEntry {
 
 interface Props {
   userId: string;
+  displayName?: string;
   isAdmin?: boolean;
   onOpenAdmin?: () => void;
 }
@@ -47,7 +48,7 @@ function generateSessionCode(): string {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function EngineerConsole({ userId, isAdmin, onOpenAdmin }: Props) {
+export default function EngineerConsole({ userId, displayName, isAdmin, onOpenAdmin }: Props) {
   // Scope every localStorage key to this user so accounts don't bleed into each other.
   const K = {
     room:    `sl_room_${userId}`,
@@ -284,6 +285,7 @@ export default function EngineerConsole({ userId, isAdmin, onOpenAdmin }: Props)
         onSignOut={async () => { await supabase.auth.signOut(); window.location.reload(); }}
         isAdmin={isAdmin}
         onOpenAdmin={onOpenAdmin}
+        displayName={displayName}
       />
 
       <div className="ec-body">
@@ -369,7 +371,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 function ConsoleNav({
-  activeTab, onTabChange, isInSession, phase, onSignOut, isAdmin, onOpenAdmin,
+  activeTab, onTabChange, isInSession, phase, onSignOut, isAdmin, onOpenAdmin, displayName,
 }: {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
@@ -378,6 +380,7 @@ function ConsoleNav({
   onSignOut: () => void;
   isAdmin?: boolean;
   onOpenAdmin?: () => void;
+  displayName?: string;
 }) {
   return (
     <nav className="ec-nav">
@@ -400,6 +403,11 @@ function ConsoleNav({
       </div>
 
       <div className="ec-nav-right">
+        {displayName && (
+          <span className="ec-greeting">
+            Welcome back, <strong>{displayName}</strong>
+          </span>
+        )}
         {isInSession && (
           <div className="ec-status-indicator">
             <span className={`ec-status-dot ${phase === 'connected' ? 'green' : ''}`} />

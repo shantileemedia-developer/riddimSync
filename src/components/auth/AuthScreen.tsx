@@ -57,6 +57,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, passwordResetMode }) =
   const [screen, setScreen]                     = useState<Screen>(passwordResetMode ? 'reset-password' : 'signin');
   const [signupRole, setSignupRole]             = useState<'artist' | 'engineer'>('artist');
   const [email, setEmail]                       = useState('');
+  const [displayName, setDisplayName]           = useState('');
   const [password, setPassword]                 = useState('');
   const [confirmPassword, setConfirmPassword]   = useState('');
   const [codeInput, setCodeInput]               = useState('');
@@ -70,7 +71,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, passwordResetMode }) =
 
   const resetForm = (next: Screen) => {
     setError(''); setInfo('');
-    setEmail(''); setPassword(''); setConfirmPassword(''); setCodeInput('');
+    setEmail(''); setDisplayName(''); setPassword(''); setConfirmPassword(''); setCodeInput('');
     setScreen(next);
   };
 
@@ -125,7 +126,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, passwordResetMode }) =
       // 2. Create account — store code in metadata so it can be claimed after email confirmation
       const { data, error } = await supabase.auth.signUp({
         email, password,
-        options: { data: { role: 'artist', pending_artist_code: code } },
+        options: { data: { role: 'artist', display_name: displayName.trim() || email.split('@')[0], pending_artist_code: code } },
       });
       if (error) throw error;
       if (!data.user) throw new Error('Sign up failed. Please try again.');
@@ -162,7 +163,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, passwordResetMode }) =
       // 2. Create account
       const { data, error } = await supabase.auth.signUp({
         email, password,
-        options: { data: { role: 'engineer' } },
+        options: { data: { role: 'engineer', display_name: displayName.trim() || email.split('@')[0] } },
       });
       if (error) throw error;
       if (!data.user) throw new Error('Sign up failed. Please try again.');
@@ -477,9 +478,14 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, passwordResetMode }) =
 
           <form onSubmit={handleSubmit} className="auth-form">
             <div className="form-group">
+              <label>Your Name</label>
+              <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)}
+                placeholder="e.g. Lee" autoFocus required maxLength={50} />
+            </div>
+            <div className="form-group">
               <label>Email</label>
               <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="you@studio.com" autoFocus required />
+                placeholder="you@studio.com" required />
             </div>
             <PasswordField value={password} onChange={setPassword}
               placeholder="Min 6 characters" minLength={6} autoComplete="new-password" />
