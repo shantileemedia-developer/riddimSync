@@ -28,6 +28,20 @@
   background: #090a0c;
   border-bottom: 1px solid #1c1e24;
   flex-shrink: 0;
+  /* Make the nav bar draggable — interactive children opt out below */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+/* Everything clickable inside the nav must opt out of drag */
+.ec-nav-links,
+.ec-nav-right,
+.ec-nav-link,
+.ec-signout-btn,
+.ec-admin-btn,
+.ec-status-indicator {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .ec-nav-brand {
