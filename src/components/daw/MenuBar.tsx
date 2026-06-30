@@ -1207,6 +1207,7 @@ const MenuBar: React.FC<MenuBarProps> = ({
                   style={{ minWidth: 220 }}
                   value={saveAsName}
                   autoFocus
+                  onFocus={e => e.currentTarget.select()}
                   onChange={e => setSaveAsName(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') executeSaveAs(); }}
                 />

@@ -82,9 +82,13 @@ const AudioMIDIPreferencesDialog: React.FC<{ onClose: () => void }> = ({ onClose
   useEffect(() => {
     const enumerate = async () => {
       try { await navigator.mediaDevices.getUserMedia({ audio: true }); } catch {}
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      setInputDevices(devices.filter(d => d.kind === 'audioinput'));
-      setOutputDevices(devices.filter(d => d.kind === 'audiooutput'));
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        setInputDevices(devices.filter(d => d.kind === 'audioinput'));
+        setOutputDevices(devices.filter(d => d.kind === 'audiooutput'));
+      } catch (e) {
+        console.error('[AudioSetup] enumerateDevices error:', e);
+      }
     };
     enumerate();
     navigator.mediaDevices.addEventListener?.('devicechange', enumerate);
