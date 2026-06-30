@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useReducer, useRef, useCallback } from 'react';
+import type { AudioEngineError } from '../types/audioErrors';
 
 export interface MeterValue {
   L: number;       // instantaneous peak dBFS, floor = -90
@@ -109,6 +110,7 @@ export interface DawState {
     punchOut: number | null;
     metronomeOn: boolean;
     countInBars: number;
+    engineState: EngineState;
   };
   trackZoom: number;
   uiDensity: 'compact' | 'standard' | 'large';
@@ -122,11 +124,15 @@ export interface DawState {
     mixer: boolean;
     mediaPool: boolean;
   };
+  audioError: AudioEngineError | null;
 }
 
 export type ActiveTool = 'select' | 'range' | 'draw' | 'erase' | 'split' | 'render' | 'mute' | 'zoom';
 
+export type EngineState = 'stopped' | 'starting' | 'playing' | 'recording' | 'stopping' | 'error' | 'recovering';
+
 export type DawBaseAction =
+  | { type: 'SET_ENGINE_STATE'; payload: EngineState }
   | { type: 'SET_PLAYING'; payload: boolean }
   | { type: 'SET_RECORDING'; payload: boolean }
   | { type: 'SET_CURRENT_TIME'; payload: number }
@@ -182,7 +188,9 @@ export type DawBaseAction =
   | { type: 'SET_TRACK_ZOOM'; payload: number }
   | { type: 'SET_UI_DENSITY'; payload: 'compact' | 'standard' | 'large' }
   | { type: 'SET_PANEL_SIZE'; payload: Partial<{ inspectorWidth: number; trackListWidth: number; mixerHeight: number }> }
-  | { type: 'SET_PANEL_VISIBILITY'; payload: Partial<{ inspector: boolean; mixer: boolean; mediaPool: boolean }> };
+  | { type: 'SET_PANEL_VISIBILITY'; payload: Partial<{ inspector: boolean; mixer: boolean; mediaPool: boolean }> }
+  | { type: 'SET_AUDIO_ERROR'; payload: AudioEngineError }
+  | { type: 'CLEAR_AUDIO_ERROR' };
 
 export type DawAction = DawBaseAction & { fromSync?: boolean };
 
@@ -241,6 +249,7 @@ export const initialState: DawState = {
   uiDensity: 'standard' as const,
   panelSizes: { inspectorWidth: 220, trackListWidth: 210, mixerHeight: 420 },
   panelVisibility: { inspector: true, mixer: true, mediaPool: true },
+  audioError: null,
   transport: {
     isPlaying: false,
     isRecording: false,
@@ -254,6 +263,7 @@ export const initialState: DawState = {
     punchOut: null,
     metronomeOn: false,
     countInBars: 0,
+    engineState: 'stopped',
   },
 };
 
@@ -263,6 +273,7 @@ function dawReducer(state: DawState, action: DawAction): DawState {
     case 'REDO':
     case 'SET_STATE':
     case 'RENAME_PROJECT':
+    case 'SET_ENGINE_STATE':
     case 'SET_PLAYING':
     case 'SET_RECORDING':
     case 'SET_CURRENT_TIME':
@@ -280,6 +291,8 @@ function dawReducer(state: DawState, action: DawAction): DawState {
     case 'SET_UI_DENSITY':
     case 'SET_PANEL_SIZE':
     case 'SET_PANEL_VISIBILITY':
+    case 'SET_AUDIO_ERROR':
+    case 'CLEAR_AUDIO_ERROR':
       return coreReducer(state, action);
     default: {
       const newState = coreReducer(state, action);
@@ -738,6 +751,14 @@ function coreReducer(state: DawState, action: DawAction): DawState {
       return { ...state, panelSizes: { ...state.panelSizes, ...action.payload } };
     case 'SET_PANEL_VISIBILITY':
       return { ...state, panelVisibility: { ...state.panelVisibility, ...action.payload } };
+
+    case 'SET_ENGINE_STATE':
+      return { ...state, transport: { ...state.transport, engineState: action.payload } };
+
+    case 'SET_AUDIO_ERROR':
+      return { ...state, audioError: action.payload };
+    case 'CLEAR_AUDIO_ERROR':
+      return { ...state, audioError: null };
 
     default:
       return state;

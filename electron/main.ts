@@ -412,6 +412,43 @@ engine.on('busChunk', (busId: string, chunk: Buffer) =>
   sendToRenderer('audio:busChunk', busId, chunk));
 
 ipcMain.handle('audio:isAvailable',  () => nativeAudioAvailable);
+ipcMain.handle('audio:getInitError', () => (globalThis as any).__paInitError ?? null);
+
+// ── Recording safety ──────────────────────────────────────────────────────────
+ipcMain.handle('audio:getDiskSpace', async (_e, dirPath: string) => {
+  try {
+    // fs.statfs available in Node 19+ / Electron 28+
+    const stats = await (fs.promises as any).statfs(dirPath);
+    return { available: stats.bfree * stats.bsize, total: stats.blocks * stats.bsize };
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('audio:checkFile', async (_e, filePath: string) => {
+  try {
+    const stat = await fs.promises.stat(filePath);
+    return { exists: true, sizeBytes: stat.size };
+  } catch {
+    return { exists: false, sizeBytes: 0 };
+  }
+});
+
+ipcMain.handle('audio:readFileHead', async (_e, filePath: string, bytes: number) => {
+  try {
+    const fd = await fs.promises.open(filePath, 'r');
+    const buf = Buffer.alloc(bytes);
+    await fd.read(buf, 0, bytes, 0);
+    await fd.close();
+    return Array.from(buf);
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('audio:deleteFile', async (_e, filePath: string) => {
+  try { await fs.promises.unlink(filePath); return true; } catch { return false; }
+});
 ipcMain.handle('audio:getDevices',   () => engine.getDevices());
 ipcMain.handle('audio:getHostAPIs',  () => ({ HostAPIs: [] }));
 

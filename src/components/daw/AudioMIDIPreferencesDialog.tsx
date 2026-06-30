@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useDaw } from '../../context/DawContext';
 import type { AudioDevice, AudioHostAPI } from '../../types/audioEngine';
 import './AudioMIDIPreferencesDialog.css';
@@ -121,6 +121,23 @@ const AudioMIDIPreferencesDialog: React.FC<{ onClose: () => void }> = ({ onClose
   const set = <K extends keyof AudioPrefs>(k: K, v: AudioPrefs[K]) =>
     setPrefs(p => ({ ...p, [k]: v }));
 
+  // ── Audio error helpers ─────────────────────────────────────────────────────
+  const audioError = state.audioError;
+
+  const copyErrorDetails = useCallback(() => {
+    if (!audioError) return;
+    const lines = [
+      `Audio Error — ${new Date(audioError.timestamp).toISOString()}`,
+      `Code:    ${audioError.code}`,
+      `Backend: ${audioError.backend}`,
+      ...(audioError.deviceName ? [`Device:  ${audioError.deviceName}`] : []),
+      ...(audioError.sampleRate ? [`Rate:    ${audioError.sampleRate} Hz`] : []),
+      '',
+      audioError.technicalMessage,
+    ];
+    navigator.clipboard.writeText(lines.join('\n')).catch(() => {});
+  }, [audioError]);
+
   // ── ASIO detection ─────────────────────────────────────────────────────────
   // Primary: check host API type (paASIO enum — doesn't depend on string name)
   // Fallback: check device hostApi string
@@ -237,6 +254,42 @@ const AudioMIDIPreferencesDialog: React.FC<{ onClose: () => void }> = ({ onClose
         </div>
 
         <div className="apd-body">
+
+          {/* ── Audio engine error ── */}
+          {audioError && (
+            <div className="apd-error-block">
+              <div className="apd-error-header">
+                <span className="apd-error-badge">{audioError.backend === 'unknown' ? 'Native' : audioError.backend}</span>
+                <span className="apd-error-msg">{audioError.userMessage}</span>
+                <button
+                  className="apd-error-dismiss"
+                  aria-label="Dismiss error"
+                  onClick={() => dispatch({ type: 'CLEAR_AUDIO_ERROR' })}
+                >✕</button>
+              </div>
+
+              {(audioError.deviceName || audioError.sampleRate) && (
+                <div className="apd-error-meta">
+                  {audioError.deviceName && <span>Device: <strong>{audioError.deviceName}</strong></span>}
+                  {audioError.sampleRate  && <span>Rate: <strong>{audioError.sampleRate.toLocaleString()} Hz</strong></span>}
+                </div>
+              )}
+
+              {audioError.code === 'ADDON_MISSING' && (
+                <div className="apd-error-rebuild">
+                  <span>Rebuild the native addon:</span>
+                  <code className="apd-error-cmd">cd electron/native &amp;&amp; node-gyp rebuild</code>
+                </div>
+              )}
+
+              <div className="apd-error-actions">
+                <button className="apd-btn-secondary apd-error-copy" onClick={copyErrorDetails}>
+                  Copy technical details
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="apd-general">
 
             {/* ── Configuration ── */}

@@ -24,7 +24,14 @@ contextBridge.exposeInMainWorld('electronWindow', {
 // ── Native Audio Engine Bridge ───────────────────────────────────────────────
 contextBridge.exposeInMainWorld('audioEngine', {
   // Capability check
-  isAvailable: (): Promise<boolean> => ipcRenderer.invoke('audio:isAvailable'),
+  isAvailable:    (): Promise<boolean>       => ipcRenderer.invoke('audio:isAvailable'),
+  getInitError:   (): Promise<string | null> => ipcRenderer.invoke('audio:getInitError'),
+
+  // Recording safety / crash recovery
+  getDiskSpace:  (dir: string): Promise<{ available: number; total: number } | null> => ipcRenderer.invoke('audio:getDiskSpace', dir),
+  checkFile:     (filePath: string): Promise<{ exists: boolean; sizeBytes: number }>  => ipcRenderer.invoke('audio:checkFile', filePath),
+  readFileHead:  (filePath: string, bytes: number): Promise<number[] | null>           => ipcRenderer.invoke('audio:readFileHead', filePath, bytes),
+  deleteFile:    (filePath: string): Promise<boolean>                                  => ipcRenderer.invoke('audio:deleteFile', filePath),
 
   // Device enumeration
   getDevices:   (): Promise<any[]> => ipcRenderer.invoke('audio:getDevices'),

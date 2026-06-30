@@ -34,8 +34,16 @@ let paAddon: any = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   paAddon = require(path.join(__dirname, '../electron/native/build/Release/pa_callback.node'));
-} catch {
-  console.warn('[AudioEngine] pa_callback addon not compiled — ASIO will use push-mode fallback');
+} catch (err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes('Pa_Initialize') || msg.includes('PortAudio backend')) {
+    // Pa_Initialize threw at addon load — emit so the renderer shows BACKEND_UNAVAILABLE
+    console.error('[AudioEngine] pa_callback addon loaded but PortAudio failed to initialize:', msg);
+    // Store the init error and emit it once the engine event system is ready
+    (globalThis as any).__paInitError = msg;
+  } else {
+    console.warn('[AudioEngine] pa_callback addon not compiled — ASIO will use push-mode fallback');
+  }
 }
 
 export const nativeAudioAvailable = !!naudiodon;
@@ -971,8 +979,10 @@ export class NativeAudioEngine extends EventEmitter {
         if (this._micBusSubs > 0 && !this.inStream) this._openMicBusStream(this.inDeviceId);
         return result;
       } catch (err) {
-        console.error('[AudioEngine] paAddon.stopRecord() failed:', err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[AudioEngine] paAddon.stopRecord() failed:', msg);
         this.emit('inputLevels', [0, 0]);
+        this.emit('error', 'Recording failed to finalize: ' + msg);
         return null;
       }
     }

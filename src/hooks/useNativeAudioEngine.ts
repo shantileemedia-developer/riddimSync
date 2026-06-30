@@ -19,6 +19,9 @@ import type { Region, PoolItem } from '../context/DawContext';
 import { generatePeaksStereo, uploadAudioToSupabase } from '../utils/audioUtils';
 import { loadAudioPrefs } from '../components/daw/AudioMIDIPreferencesDialog';
 import type { NativeTrackSpec } from '../types/audioEngine';
+import { makeAudioError } from '../types/audioErrors';
+import { logTransport } from '../utils/transportLog';
+import { writeRecordingMarker, clearRecordingMarker } from './useRecordingRecovery';
 
 const eng = () => window.audioEngine;
 
@@ -71,7 +74,7 @@ async function decodeToWavBuffer(ab: ArrayBuffer): Promise<ArrayBuffer> {
 
 // ── Hook ───────────────────────────────────────────────────────────────────────
 
-export const useNativeAudioEngine = () => {
+export const useNativeAudioEngine = (roomCode = '') => {
   const {
     state, dispatch,
     currentTimeRef, audioCtxRef,
@@ -95,12 +98,43 @@ export const useNativeAudioEngine = () => {
       nativeAvailableRef.current = ok;
       setNativeAvailable(ok);
     });
+    // Surface Pa_Initialize failure that occurred before the renderer was ready
+    eng()!.getInitError?.().then((errMsg: string | null) => {
+      if (errMsg) {
+        console.error('[NativeAudio] Pa_Initialize failed at addon load:', errMsg);
+        dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(errMsg, { code: 'BACKEND_UNAVAILABLE' }) });
+      }
+    });
     const off = eng()!.onUnavailable(() => {
       nativeAvailableRef.current = false;
       setNativeAvailable(false);
+      logTransport('device_disconnected', { wasPlaying: isPlayingRef.current, wasRecording: isRecordingRef.current });
+      dispatch({ type: 'SET_ENGINE_STATE', payload: 'error' });
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(
+        'Audio device disconnected.',
+        { code: 'OUTPUT_UNAVAILABLE' },
+      )});
+      if (isPlayingRef.current) {
+        isPlayingRef.current = false;
+        stopAnimLoop();
+        stopMetronome();
+        dispatch({ type: 'SET_PLAYING', payload: false });
+        if (isRecordingRef.current) {
+          // Stop recording session without calling the native engine (device is gone).
+          // Do NOT clear the recovery marker here — the WAV file may contain valid
+          // audio up to the point of disconnect. The marker survives so that
+          // RecordingRecoveryDialog appears on next startup, giving the artist a
+          // chance to restore the partial take.
+          isRecordingRef.current = false;
+          isRecordingNativeRef.current = false;
+          unsubRecProgressRef.current?.();
+          unsubRecProgressRef.current = null;
+          dispatch({ type: 'SET_RECORDING', payload: false });
+        }
+      }
     });
     return off;
-  }, []);
+  }, [dispatch]);
 
   // ── Transport refs (kept in sync with state so closures read current values)
 
@@ -401,8 +435,32 @@ export const useNativeAudioEngine = () => {
   const playFnRef = useRef<(() => Promise<void>) | null>(null);
   const stopRecordingSessionRef = useRef<(() => Promise<void>) | null>(null);
 
+  const lastPosTimeRef  = useRef<number>(Date.now());
+  const isStallRef      = useRef(false);
+  const STALL_MS        = 3000;
+
   useEffect(() => {
     if (!eng()) return;
+
+    // ── Transport watchdog: detect position stream stalls ─────────────────────
+    const watchdogId = setInterval(() => {
+      if (!isPlayingRef.current) return;
+      const msSince = Date.now() - lastPosTimeRef.current;
+      if (!isStallRef.current && msSince > STALL_MS) {
+        isStallRef.current = true;
+        logTransport('stall_detected', { msSince, currentTime: currentTimeRef.current });
+        dispatch({ type: 'SET_ENGINE_STATE', payload: 'error' });
+        dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(
+          `Transport stalled — no position update for ${(msSince / 1000).toFixed(1)} s`,
+          { code: 'PLAYBACK_FAILED' },
+        )});
+      } else if (isStallRef.current && msSince < STALL_MS) {
+        isStallRef.current = false;
+        logTransport('stall_recovered', {});
+        dispatch({ type: 'SET_ENGINE_STATE', payload: isRecordingRef.current ? 'recording' : 'playing' });
+        dispatch({ type: 'CLEAR_AUDIO_ERROR' });
+      }
+    }, 500);
 
     let _auditPosCnt = 0;
     const offPos = eng()!.onPosition(async (t: number) => {
@@ -414,6 +472,7 @@ export const useNativeAudioEngine = () => {
         console.log(`[AUDIT][Hook][onPosition] DROPPED (not playing) t=${t.toFixed(4)}s`);
         return;
       }
+      lastPosTimeRef.current = Date.now();
       _auditPosCnt++;
       if (_auditPosCnt % 50 === 0) {
         console.log(`[AUDIT][Hook][onPosition] t=${t.toFixed(4)}s currentTimeRef=${currentTimeRef.current.toFixed(4)}s`);
@@ -466,10 +525,13 @@ export const useNativeAudioEngine = () => {
     const offEnded = eng()!.onEnded((t: number) => {
       currentTimeRef.current = t;
       isPlayingRef.current   = false;
+      isStallRef.current     = false;
       stopAnimLoop();
       stopMetronome();
+      dispatch({ type: 'SET_ENGINE_STATE', payload: 'stopped' });
       dispatch({ type: 'SET_PLAYING', payload: false });
       dispatch({ type: 'SET_CURRENT_TIME', payload: t });
+      logTransport('stop', { currentTime: t, reason: 'project_end' });
     });
 
     const PEAK_HOLD_MS = 2000;
@@ -522,9 +584,15 @@ export const useNativeAudioEngine = () => {
 
     const offErr = eng()!.onError((msg: string) => {
       console.error('[NativeAudio]', msg);
+      dispatch({ type: 'SET_ENGINE_STATE', payload: 'error' });
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(msg) });
+      logTransport('engine_error', { msg });
     });
 
-    return () => { offPos(); offEnded(); offLevels(); offTrackLevels(); offInputLevels(); offErr(); };
+    return () => {
+      clearInterval(watchdogId);
+      offPos(); offEnded(); offLevels(); offTrackLevels(); offInputLevels(); offErr();
+    };
   }, [
     currentTimeRef, dispatch, nativeMasterLevelsRef, livePeaksRef,
     stopAnimLoop, stopMetronome,
@@ -558,7 +626,12 @@ export const useNativeAudioEngine = () => {
       const prefs = loadAudioPrefs();
       const inputChOffset = Math.max(0, (monitorTrack.inputChannel ?? 1) - 1);
       const numCh = Math.max(2, inputChOffset + 1);
-      eng()!.startMonitoring(prefs.nativeInputDeviceId, prefs.nativeOutputDeviceId, 48000, numCh, inputChOffset).catch(() => {});
+      eng()!.startMonitoring(prefs.nativeInputDeviceId, prefs.nativeOutputDeviceId, 48000, numCh, inputChOffset).catch((err: unknown) => {
+        monitoringActiveRef.current = false;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[NativeAudio] startMonitoring() failed:', msg);
+        dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(msg, { code: 'INPUT_UNAVAILABLE' }) });
+      });
     } else if (!monitorTrack && monitoringActiveRef.current) {
       monitoringActiveRef.current = false;
       eng()!.stopMonitoring().catch(() => {});
@@ -568,16 +641,28 @@ export const useNativeAudioEngine = () => {
   // ── Transport ──────────────────────────────────────────────────────────────
 
   const play = useCallback(async () => {
-    if (!nativeAvailableRef.current || !eng()) return;
+    if (!eng()) {
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError('Native audio addon missing or not built.', { code: 'ADDON_MISSING' }) });
+      return;
+    }
+    if (!nativeAvailableRef.current) {
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError('PortAudio backend unavailable.', { code: 'BACKEND_UNAVAILABLE' }) });
+      return;
+    }
+
     const prefs  = loadAudioPrefs();
     const offset = currentTimeRef.current;
     const specs  = await buildSpecs(offset);
 
     dispatch({ type: 'SET_PLAYING', payload: true });
+    dispatch({ type: 'SET_ENGINE_STATE', payload: 'starting' });
     isPlayingRef.current   = true;
+    lastPosTimeRef.current = Date.now();
+    isStallRef.current     = false;
     punchArmedRef.current  = state.transport.punchIn != null;
     punchWritingRef.current = false;
     startAnimLoop();
+    logTransport('play', { offset });
 
     // Always ensure the Web Audio context is running so bus chunks can flow
     // into masterStreamRef (the WebRTC monitoring stream). Without this, a
@@ -589,13 +674,25 @@ export const useNativeAudioEngine = () => {
       startMetronome(ctx, offset);
     }
 
-    await eng()!.play(
-      specs, offset,
-      prefs.nativeOutputDeviceId !== -1 ? prefs.nativeOutputDeviceId : undefined,
-      48000,
-    );
+    try {
+      await eng()!.play(
+        specs, offset,
+        prefs.nativeOutputDeviceId !== -1 ? prefs.nativeOutputDeviceId : undefined,
+        48000,
+      );
+      dispatch({ type: 'SET_ENGINE_STATE', payload: 'playing' });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[NativeAudio] play() failed:', msg);
+      dispatch({ type: 'SET_PLAYING', payload: false });
+      dispatch({ type: 'SET_ENGINE_STATE', payload: 'error' });
+      isPlayingRef.current = false;
+      stopAnimLoop();
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(msg, { code: 'PLAYBACK_FAILED' }) });
+      logTransport('engine_error', { msg, context: 'play' });
+    }
   }, [
-    buildSpecs, currentTimeRef, dispatch, startAnimLoop, getAudioCtx, startMetronome,
+    buildSpecs, currentTimeRef, dispatch, startAnimLoop, stopAnimLoop, getAudioCtx, startMetronome,
     state.transport.metronomeOn, state.transport.punchIn,
   ]);
 
@@ -606,28 +703,36 @@ export const useNativeAudioEngine = () => {
     const _t0 = performance.now();
     console.log(`[AUDIT][Hook][pause] ENTER isPlaying=${isPlayingRef.current} currentTime=${currentTimeRef.current.toFixed(4)}s`);
     isPlayingRef.current   = false;
+    isStallRef.current     = false;
     punchArmedRef.current  = false;
     punchWritingRef.current = false;
     stopAnimLoop();
     stopMetronome();
+    dispatch({ type: 'SET_ENGINE_STATE', payload: 'stopping' });
     if (isRecordingRef.current) await stopRecordingSessionRef.current?.();
     console.log(`[AUDIT][Hook][pause] sending IPC stop t=${performance.now().toFixed(1)}ms`);
     await eng()?.stop();
     console.log(`[AUDIT][Hook][pause] IPC stop resolved elapsed=${(performance.now() - _t0).toFixed(1)}ms`);
+    dispatch({ type: 'SET_ENGINE_STATE', payload: 'stopped' });
     dispatch({ type: 'SET_PLAYING', payload: false });
+    logTransport('stop', { currentTime: currentTimeRef.current, reason: 'pause' });
   }, [stopAnimLoop, stopMetronome, dispatch, currentTimeRef]);
 
   const stop = useCallback(async () => {
     isPlayingRef.current   = false;
+    isStallRef.current     = false;
     punchArmedRef.current  = false;
     punchWritingRef.current = false;
     stopAnimLoop();
     stopMetronome();
+    dispatch({ type: 'SET_ENGINE_STATE', payload: 'stopping' });
     if (isRecordingRef.current) await stopRecordingSessionRef.current?.();
     await eng()?.stop();
     currentTimeRef.current = 0;
+    dispatch({ type: 'SET_ENGINE_STATE', payload: 'stopped' });
     dispatch({ type: 'SET_PLAYING', payload: false });
     dispatch({ type: 'SET_CURRENT_TIME', payload: 0 });
+    logTransport('stop', { currentTime: 0, reason: 'stop' });
   }, [stopAnimLoop, stopMetronome, currentTimeRef, dispatch]);
 
   const seek = useCallback(async (t: number) => {
@@ -641,6 +746,7 @@ export const useNativeAudioEngine = () => {
     if (isPlayingRef.current && state.transport.metronomeOn) {
       startMetronome(getAudioCtx(), clamped);
     }
+    logTransport('seek', { t: clamped });
   }, [currentTimeRef, dispatch, getAudioCtx, startMetronome, state.transport.metronomeOn]);
 
   // ── Recording ──────────────────────────────────────────────────────────────
@@ -656,82 +762,132 @@ export const useNativeAudioEngine = () => {
     isRecordingNativeRef.current = false;
     unsubRecProgressRef.current?.();
     unsubRecProgressRef.current  = null;
-    console.log('[REC 1] stopRecordingSession — stopping native engine');
+
+    // ── Phase 1: Zero-gap visual handoff ──────────────────────────────────────
+    // Snapshot live state BEFORE any await. These three dispatches are synchronous,
+    // so React 18 batches them into one render: ADD_REGION appears at the exact
+    // frame the live canvas hides — no blank period.
+    const livePeaks    = livePeaksRef.current.slice();
+    const startTime    = recordingStartDawTimeRef.current;
+    const liveDuration = Math.max(0.05, currentTimeRef.current - startTime);
+    const trackId      = armedTrackIdRef.current!;
+    const trackObj     = state.tracks.find(t => t.id === trackId);
+    const trackName    = trackObj?.name ?? 'Track';
+    const takeNum      = state.poolItems.filter(p => p.name.startsWith(trackName)).length + 1;
+    const takeName     = `${trackName}_Take_${takeNum}`;
+    const poolItemId   = `pool_${Date.now()}`;
+    const regionId     = `region_${Date.now()}`;
+
+    console.log('[REC 1] stopRecordingSession — immediate region creation, livePeaks:', livePeaks.length);
+    dispatch({ type: 'ADD_POOL_ITEM', payload: {
+      id: poolItemId, name: takeName, audioUrl: '',
+      localFileName: `${takeName}.wav`,
+      duration: liveDuration, createdAt: new Date(),
+      waveformPeaks: livePeaks, waveformPeaksR: null,
+    } as PoolItem });
+    dispatch({ type: 'ADD_REGION', payload: {
+      id: regionId, poolItemId, trackId,
+      versionId:      trackObj?.activeVersionId ?? 'default',
+      startTime,      duration:       liveDuration,
+      name:           takeName,       audioUrl:       '',
+      waveformPeaks:  livePeaks,      sourceDuration: liveDuration,
+      sourcePeaks:    livePeaks,
+    } as Region });
     dispatch({ type: 'SET_RECORDING', payload: false });
 
+    // ── Phase 2: Stop native engine ────────────────────────────────────────────
     await eng()?.stopMonitoring();
-    monitoringActiveRef.current = false; // let the monitoring effect restart if a track still has isMonitoring=true
+    monitoringActiveRef.current = false;
     const result = await eng()?.stopRecording();
     if (!result) { console.log('[REC ERROR] stopRecording returned no result'); return; }
 
     const { filePath, duration } = result;
+    const audioUrl = `file://${filePath}`;
     console.log('[REC 2] Native engine stopped — filePath:', filePath, 'duration:', duration);
-    const trackId     = armedTrackIdRef.current!;
-    const trackObj    = state.tracks.find(t => t.id === trackId);
-    const trackName   = trackObj?.name ?? 'Track';
-    const takeNum     = state.poolItems.filter(p => p.name.startsWith(trackName)).length + 1;
-    const takeName    = `${trackName}_Take_${takeNum}`;
-    const audioUrl    = `file://${filePath}`;
-    const poolItemId  = `pool_${Date.now()}`;
 
-    let peaks:      number[] = [];
+    // ── Phase 3: WAV integrity check ──────────────────────────────────────────
+    // Done before upload so we never push a corrupt file to Supabase.
+    const head = await eng()!.readFileHead?.(filePath, 12).catch(() => null);
+    if (head && head.length >= 12) {
+      const riff = String.fromCharCode(head[0], head[1], head[2], head[3]);
+      const wave = String.fromCharCode(head[8], head[9], head[10], head[11]);
+      if (riff !== 'RIFF' || wave !== 'WAVE') {
+        console.error('[REC ERROR] WAV integrity check failed — invalid header:', riff, wave);
+        logTransport('wav_integrity_fail', { filePath, riff, wave });
+        dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(
+          `Recorded file has an invalid WAV header (got "${riff}…${wave}" instead of "RIFF…WAVE"). The take may be corrupt.`,
+          { code: 'RECORDING_FAILED' },
+        )});
+        // Marker stays — file exists on disk and the artist can inspect it.
+        // Do not upload or clear the marker for a corrupt file.
+        return;
+      }
+    }
+    console.log('[REC 3] WAV integrity OK');
+
+    // ── Phase 4: Decode WAV + generate high-res peaks ──────────────────────────
+    let peaks:      number[]        = livePeaks;  // keep live peaks if decode fails
     let peaksR:     number[] | null = null;
-    let uploadBlob: Blob | null = null;
+    let uploadBlob: Blob   | null   = null;
     try {
-      console.log('[REC 3] Fetching recorded file for decode + peaks');
+      console.log('[REC 4] Fetching recorded file for decode + peaks');
       const resp   = await fetch(audioUrl);
       const ab     = await resp.arrayBuffer();
-      console.log('[REC 4] File fetched — bytes:', ab.byteLength);
-      uploadBlob   = new Blob([ab]);  // capture before decodeAudioData may detach ab
+      console.log('[REC 5] File fetched — bytes:', ab.byteLength);
+      uploadBlob   = new Blob([ab]);
       const tmpCtx = new AudioContext();
       const buf    = await tmpCtx.decodeAudioData(ab);
       await tmpCtx.close();
-      console.log('[REC 5] Audio decoded — channels:', buf.numberOfChannels, 'samples:', buf.length);
+      console.log('[REC 6] Audio decoded — channels:', buf.numberOfChannels, 'samples:', buf.length);
       const stereo = await generatePeaksStereo(buf);
       peaks  = stereo.left;
       peaksR = trackObj?.type === 'stereo' ? stereo.right : null;
-      console.log('[REC 6] Waveform generated — left:', peaks.length, 'right:', peaksR?.length ?? 0);
+      console.log('[REC 7] Waveform generated — left:', peaks.length, 'right:', peaksR?.length ?? 0);
     } catch (err) { console.error('[REC ERROR] Decode/peaks failed:', err); }
 
-    console.log('[REC 7] Starting Supabase upload — blob size:', uploadBlob?.size ?? 'fallback fetch');
+    // ── Phase 5: Swap in final audio URL + decoded peaks ───────────────────────
+    // UPDATE_REGION sets the local file URL + decoded peaks on the artist's machine.
+    // UPDATE_AUDIO_URLS is NOT dispatched here because it would broadcast a file://
+    // URL to the engineer (useDawSync does not strip local URLs from that action).
+    // The engineer gets the final URL via UPDATE_AUDIO_URLS in Phase 6 (Supabase URL).
+    console.log('[REC 8] Upgrading region with final audio URL + decoded peaks');
+    dispatch({ type: 'UPDATE_REGION', payload: {
+      id: regionId,
+      updates: {
+        audioUrl, duration, localFilePath: filePath,
+        waveformPeaks: peaks, waveformPeaksR: peaksR,
+        sourceDuration: duration, sourcePeaks: peaks, sourcePeaksR: peaksR,
+      } as Partial<Region>,
+    }});
+
+    // ── Phase 6: Supabase upload in background ────────────────────────────────
+    console.log('[REC 9] Starting Supabase upload — blob size:', uploadBlob?.size ?? 'fallback fetch');
     const blobForUpload: Blob = uploadBlob !== null ? uploadBlob : await fetch(audioUrl).then(r => r.blob());
     uploadAudioToSupabase(blobForUpload, `${takeName}.wav`).then(({ publicUrl }) => {
-      console.log('[REC 11] Upload complete — dispatching UPDATE_AUDIO_URLS');
+      console.log('[REC 10] Upload complete — dispatching UPDATE_AUDIO_URLS');
       if (publicUrl !== audioUrl)
         dispatch({ type: 'UPDATE_AUDIO_URLS', payload: { poolItemId, audioUrl: publicUrl } });
     }).catch((err) => { console.error('[REC ERROR] Upload failed:', err); });
 
-    const poolItem: PoolItem = {
-      id: poolItemId, name: takeName, audioUrl,
-      localFileName: `${takeName}.wav`,
-      duration, createdAt: new Date(),
-      waveformPeaks: peaks, waveformPeaksR: peaksR,
-    };
-    const region: Region = {
-      id: `region_${Date.now()}`,
-      poolItemId, trackId,
-      versionId:     trackObj?.activeVersionId ?? 'default',
-      startTime:     recordingStartDawTimeRef.current,
-      duration,      name: takeName, audioUrl,
-      waveformPeaks:  peaks,
-      waveformPeaksR: peaksR,
-      sourceDuration: duration,
-      sourcePeaks:    peaks,
-      sourcePeaksR:   peaksR,
-      ...(({ localFilePath: filePath }) as any),
-    };
+    // ── Phase 7: Clear crash-recovery marker ────────────────────────────────────
+    clearRecordingMarker();
 
-    console.log('[REC 8] Dispatching ADD_POOL_ITEM — id:', poolItemId);
-    dispatch({ type: 'ADD_POOL_ITEM', payload: poolItem });
-    console.log('[REC 9] ADD_POOL_ITEM dispatched — dispatching ADD_REGION');
-    dispatch({ type: 'ADD_REGION',    payload: region });
-    console.log('[REC 10] ADD_REGION dispatched — stopRecordingSession complete');
+    dispatch({ type: 'SET_ENGINE_STATE', payload: 'playing' });
+    logTransport('recording_stop', { takeName, duration, filePath });
+    console.log('[REC 10] stopRecordingSession complete');
   }, [state.tracks, state.poolItems, dispatch]);
 
   stopRecordingSessionRef.current = stopRecordingSession;
 
   const record = useCallback(async () => {
-    if (!nativeAvailableRef.current || !eng()) return;
+    if (!eng()) {
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError('Native audio addon missing or not built.', { code: 'ADDON_MISSING' }) });
+      return;
+    }
+    if (!nativeAvailableRef.current) {
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError('PortAudio backend unavailable.', { code: 'BACKEND_UNAVAILABLE' }) });
+      return;
+    }
     if (isRecordingRef.current) return;
 
     const armedTrack = state.tracks.find(t => t.isArmed);
@@ -774,11 +930,37 @@ export const useNativeAudioEngine = () => {
 
     const filePath = await eng()!.getTakePath(takeName);
 
+    // ── Pre-recording safety: disk space ─────────────────────────────────────
+    const takeDir = filePath.includes('/') || filePath.includes('\\')
+      ? filePath.substring(0, Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\')))
+      : '.';
+    const diskInfo = await eng()!.getDiskSpace?.(takeDir).catch(() => null);
+    const MIN_DISK_BYTES = 500 * 1024 * 1024; // 500 MB
+    if (diskInfo && diskInfo.available < MIN_DISK_BYTES) {
+      const availMB = Math.round(diskInfo.available / 1024 / 1024);
+      logTransport('disk_space_warning', { availMB, path: takeDir });
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(
+        `Low disk space: only ${availMB} MB available on recording drive. Recording may fail.`,
+        { code: 'RECORDING_FAILED' },
+      )});
+      // Warn but don't block — let the user continue or stop
+    }
+
+    // ── Write crash-recovery marker ───────────────────────────────────────────
+    writeRecordingMarker({
+      takeName, filePath, trackId: armedTrack.id, trackName: armedTrack.name,
+      startTime: currentTimeRef.current, roomCode, timestamp: Date.now(),
+    });
+
     dispatch({ type: 'SET_RECORDING', payload: true });
     dispatch({ type: 'SET_PLAYING',   payload: true });
+    dispatch({ type: 'SET_ENGINE_STATE', payload: 'recording' });
     isPlayingRef.current   = true;
+    lastPosTimeRef.current = Date.now();
+    isStallRef.current     = false;
     isRecordingRef.current = true;
     startAnimLoop();
+    logTransport('recording_start', { trackId: armedTrack.id, takeName, startTime: currentTimeRef.current });
 
     if (state.transport.metronomeOn) {
       startMetronome(ctx, currentTimeRef.current);
@@ -792,16 +974,38 @@ export const useNativeAudioEngine = () => {
     }
 
     const inputChOffset = Math.max(0, (armedTrack.inputChannel ?? 1) - 1);
-    await eng()!.startRecording(filePath, inId, outId, 48000, 2, currentTimeRef.current, inputChOffset);
+    try {
+      await eng()!.startRecording(filePath, inId, outId, 48000, 2, currentTimeRef.current, inputChOffset);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[NativeAudio] startRecording() failed:', msg);
+      isRecordingRef.current = false;
+      isRecordingNativeRef.current = false;
+      isPlayingRef.current = false;
+      stopAnimLoop();
+      stopMetronome();
+      unsubRecProgressRef.current?.();
+      unsubRecProgressRef.current = null;
+      dispatch({ type: 'SET_RECORDING', payload: false });
+      dispatch({ type: 'SET_PLAYING',   payload: false });
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(msg, { code: 'RECORDING_FAILED' }) });
+      return;
+    }
 
     // Always call play so the position clock runs and the live waveform draws,
     // even on an empty timeline (specs can be [] for a first-take recording).
     const specs = await buildSpecs(currentTimeRef.current);
-    await eng()!.play(specs, currentTimeRef.current, outId !== -1 ? outId : undefined, 48000);
+    try {
+      await eng()!.play(specs, currentTimeRef.current, outId !== -1 ? outId : undefined, 48000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[NativeAudio] play() during record failed:', msg);
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(msg, { code: 'PLAYBACK_FAILED' }) });
+    }
   }, [
     state.tracks, state.poolItems, state.transport,
     currentTimeRef, recordingStartTimeRef, livePeaksRef,
-    dispatch, buildSpecs, startAnimLoop, getAudioCtx, startMetronome, scheduleClick,
+    dispatch, buildSpecs, startAnimLoop, stopAnimLoop, stopMetronome, getAudioCtx, startMetronome, scheduleClick,
   ]);
 
   // ── Cleanup ────────────────────────────────────────────────────────────────

@@ -528,3 +528,29 @@
   border-color: rgba(255, 77, 77, 0.6);
   color: #ff8888;
 }
+
+/* ── Autosave restore banner ── */
+.daw-autosave-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: #1a2040;
+  border-bottom: 1px solid #2a4080;
+  font-size: 12px;
+  color: #90b0e8;
+  flex-shrink: 0;
+}
+.daw-autosave-banner span { flex: 1; }
+.daw-autosave-banner button {
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: inherit;
+  font-size: 11px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.daw-autosave-banner button:first-of-type { color: #6090e0; font-weight: 600; }
+.daw-autosave-banner button:hover { opacity: 0.8; }

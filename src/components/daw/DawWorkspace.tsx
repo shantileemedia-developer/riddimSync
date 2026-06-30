@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import './DawWorkspace.css';
 import { useAudioEngine } from '../../hooks/useAudioEngine';
 import { useNativeAudioEngine } from '../../hooks/useNativeAudioEngine';
+import { useSessionAutosave } from '../../hooks/useSessionAutosave';
+import { useRecordingRecovery } from '../../hooks/useRecordingRecovery';
 import { useDawSync } from '../../hooks/useDawSync';
 import { useDaw } from '../../context/DawContext';
 import { useRemoteControlReplay } from '../../hooks/useRemoteControl';
@@ -20,6 +22,9 @@ import MonitorPanel, { type MonitorSource } from './MonitorPanel';
 import RemoteControlOverlay, { type RemoteControlOverlayHandle } from './RemoteControlOverlay';
 import MixerPanel from './MixerPanel';
 import AudioMIDIPreferencesDialog from './AudioMIDIPreferencesDialog';
+import AudioErrorBanner from './AudioErrorBanner';
+import RecordingRecoveryDialog from './RecordingRecoveryDialog';
+import SampleRateMismatchDialog from './SampleRateMismatchDialog';
 import LyricsPanel from './LyricsPanel';
 import { supabase } from '../../lib/supabaseClient';
 import type { MonitorQuality } from '../../hooks/useAudioStream';
@@ -94,10 +99,24 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   const lastViewSyncRef  = useRef(0);
   // Disable Web Audio when the native preload bridge is present — only one engine active at a time
   const webAudio   = useAudioEngine({ enabled: !window.audioEngine });
-  const nativeAudio = useNativeAudioEngine();
+  const nativeAudio = useNativeAudioEngine(roomCode);
   // Use native engine when available; fall back to Web Audio API
   const { play, pause, stop, record, seek } = nativeAudio.nativeAvailable ? nativeAudio : webAudio;
   const { state, dispatch, masterStreamRef, nativeStreamRef, audioCtxRef, currentTimeRef, audioDirPath } = useDaw();
+
+  // ── Session autosave ────────────────────────────────────────────────────────
+  const { hasAutosave, restoreAutosave, clearAutosave } = useSessionAutosave(roomCode);
+  const [showAutosaveBanner, setShowAutosaveBanner] = useState(() => false);
+  useEffect(() => {
+    // Delay check slightly so the initial render settles
+    const id = setTimeout(() => { if (hasAutosave) setShowAutosaveBanner(true); }, 800);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Crash recording recovery ────────────────────────────────────────────────
+  const { recoveredTake, checkForRecovery, restoreRecoveredTake, discardRecoveredTake } = useRecordingRecovery(roomCode);
+  useEffect(() => { checkForRecovery(); }, [checkForRecovery]);
 
   // Extracted so onRecordSync can call it without referencing handleStopRecording
   const stopRecording = useCallback(async () => {
@@ -748,7 +767,28 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
       {showPreferences && <PreferencesDialog onClose={() => setShowPreferences(false)} />}
       {showAudioPrefs && <AudioMIDIPreferencesDialog onClose={() => setShowAudioPrefs(false)} />}
       {showLyrics && <LyricsPanel onClose={() => setShowLyrics(false)} />}
+
+      {/* Crash-recovery + sample rate modals — rendered above everything */}
+      {recoveredTake && (
+        <RecordingRecoveryDialog
+          take={recoveredTake}
+          onRestore={() => { restoreRecoveredTake(); }}
+          onDiscard={() => { discardRecoveredTake(); }}
+        />
+      )}
+      <SampleRateMismatchDialog onOpenAudioSettings={() => setShowAudioPrefs(true)} />
+
       <TopToolbar roomCode={roomCode} userRole={userRole} onlineCount={onlineCount} desktopActive={rcActive} />
+      <AudioErrorBanner onOpenAudioSettings={() => setShowAudioPrefs(true)} />
+
+      {/* Autosave restore banner */}
+      {showAutosaveBanner && (
+        <div className="daw-autosave-banner">
+          <span>An autosaved session was found for this room.</span>
+          <button onClick={() => { restoreAutosave(); setShowAutosaveBanner(false); }}>Restore</button>
+          <button onClick={() => { clearAutosave(); setShowAutosaveBanner(false); }}>Discard</button>
+        </div>
+      )}
 
       {/* ── Artist: persistent control status bar — one row per active permission ── */}
       {userRole === 'artist' && (dawControlActive || rcActive) && (

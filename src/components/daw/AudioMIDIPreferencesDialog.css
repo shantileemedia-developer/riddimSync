@@ -270,6 +270,94 @@
   line-height: 1.5;
 }
 
+/* ── Audio engine error block ── */
+.apd-error-block {
+  background: #1f1212;
+  border-bottom: 2px solid #8b2020;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.apd-error-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.apd-error-badge {
+  background: #8b2020;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.apd-error-msg {
+  flex: 1;
+  font-size: 12px;
+  color: #e8c0c0;
+  line-height: 1.5;
+}
+
+.apd-error-dismiss {
+  background: none;
+  border: none;
+  color: #806060;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.apd-error-dismiss:hover { color: #e8c0c0; }
+
+.apd-error-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 11px;
+  color: #a08080;
+  padding-left: 2px;
+}
+.apd-error-meta strong { color: #c8a8a8; }
+
+.apd-error-rebuild {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: #a08080;
+  padding-left: 2px;
+}
+
+.apd-error-cmd {
+  font-family: 'Consolas', 'Menlo', monospace;
+  font-size: 11px;
+  background: #2a1818;
+  color: #e8c0a0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid #3d2020;
+  user-select: all;
+}
+
+.apd-error-actions {
+  padding-left: 2px;
+}
+
+.apd-error-copy {
+  font-size: 11px;
+  height: 22px;
+  padding: 0 10px;
+}
+
 .apd-asio-panel-btn {
   height: 26px;
   width: 32px;

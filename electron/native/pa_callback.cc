@@ -109,6 +109,55 @@ struct RingBuffer {
     }
 };
 
+// ── Lock-free SPSC ring buffer for callback→dispatch events ──────────────────
+// The audio callback pushes POD CbEvent entries; the dispatch thread pops them
+// and calls NonBlockingCall on the V8 thread. This keeps all heap allocation
+// and mutex acquisition (NonBlockingCall acquires a mutex internally) off the
+// audio thread.
+
+enum class EvtKind : uint8_t { Pos = 0, Lev, TrLev, InputLev, Ended };
+
+struct CbEvent {
+    EvtKind kind;
+    uint8_t nTracks;       // TrLev: entries in trl[] (≤64)
+    float   lr[2];         // Lev, InputLev: [rmsL, rmsR]
+    double  pos;           // Pos, Ended: seconds from timeline zero
+    float   trl[64 * 2];  // TrLev: interleaved [L0,R0,L1,R1,…]
+};
+
+static const int EVT_RING_CAP = 128;  // power of 2; ~2.7 s headroom at 47 pos-events/s
+
+struct EvtRing {
+    CbEvent          slots[EVT_RING_CAP];
+    std::atomic<int> head{0};
+    std::atomic<int> tail{0};
+
+    // Returns false and drops if full — prefer glitch-free over blocking.
+    bool push(const CbEvent &evt) {
+        int h    = head.load(std::memory_order_relaxed);
+        int t    = tail.load(std::memory_order_acquire);
+        int next = (h + 1) & (EVT_RING_CAP - 1);
+        if (next == t) return false;
+        slots[h] = evt;
+        head.store(next, std::memory_order_release);
+        return true;
+    }
+
+    bool pop(CbEvent &evt) {
+        int t = tail.load(std::memory_order_relaxed);
+        int h = head.load(std::memory_order_acquire);
+        if (t == h) return false;
+        evt = slots[t];
+        tail.store((t + 1) & (EVT_RING_CAP - 1), std::memory_order_release);
+        return true;
+    }
+
+    void reset() {
+        head.store(0, std::memory_order_relaxed);
+        tail.store(0, std::memory_order_relaxed);
+    }
+};
+
 // ── WAV helpers ───────────────────────────────────────────────────────────────
 
 static void writeWavHeader(FILE *f, int sr, int ch) {
@@ -171,6 +220,10 @@ static struct Engine {
     std::thread      writeThread;
     std::atomic<int> writeThreadStop{0};
 
+    EvtRing          evtRing;
+    std::thread      dispatchThread;
+    std::atomic<int> dispatchThreadStop{0};
+
     // ── Throttling (audio thread only — no sync needed) ──
     int cbCount = 0;
 
@@ -224,6 +277,13 @@ static struct Engine {
             stream = nullptr;
         }
 
+        // Dispatch thread must join before write thread and before releaseTsfns()
+        // so that any remaining events in evtRing fire while TSFNs are still live.
+        if (dispatchThread.joinable()) {
+            dispatchThreadStop.store(1, std::memory_order_relaxed);
+            dispatchThread.join();
+        }
+
         if (writeThread.joinable()) {
             writeThreadStop.store(1, std::memory_order_relaxed);
             writeThread.join();
@@ -237,6 +297,7 @@ static struct Engine {
         cbCount         = 0;
         ring.head.store(0, std::memory_order_relaxed);
         ring.tail.store(0, std::memory_order_relaxed);
+        evtRing.reset();
 
         releaseTsfns();
         clearTracks();
@@ -343,9 +404,87 @@ static void writeThreadFn() {
     dispatchPeaks();  // flush any remaining peaks before the write thread exits
 }
 
+// ── Dispatch thread ───────────────────────────────────────────────────────────
+// Drains CbEvent entries from evtRing and fires the appropriate TSFN.
+// Runs on its own std::thread — NonBlockingCall's internal mutex is safe here,
+// never on the audio thread.
+
+static void dispatchEvent(const CbEvent &evt) {
+    switch (evt.kind) {
+    case EvtKind::Pos: {
+        if (!gEng.tsfCreated) return;
+        auto *p = new PosPacket{evt.pos};
+        gEng.tsfPos.NonBlockingCall(p, [](Napi::Env env, Napi::Function cb, PosPacket *d) {
+            cb.Call({Napi::Number::New(env, d->pos)});
+            delete d;
+        });
+        break;
+    }
+    case EvtKind::Ended: {
+        if (!gEng.tsfCreated) return;
+        auto *p = new EndPacket{evt.pos};
+        gEng.tsfEnded.NonBlockingCall(p, [](Napi::Env env, Napi::Function cb, EndPacket *d) {
+            cb.Call({Napi::Number::New(env, d->pos)});
+            delete d;
+        });
+        break;
+    }
+    case EvtKind::Lev: {
+        if (!gEng.tsfCreated) return;
+        auto *p = new LevPacket{evt.lr[0], evt.lr[1]};
+        gEng.tsfLevels.NonBlockingCall(p, [](Napi::Env env, Napi::Function cb, LevPacket *d) {
+            Napi::Array a = Napi::Array::New(env, 2);
+            a.Set(0u, Napi::Number::New(env, d->l));
+            a.Set(1u, Napi::Number::New(env, d->r));
+            cb.Call({a});
+            delete d;
+        });
+        break;
+    }
+    case EvtKind::TrLev: {
+        if (!gEng.tsfCreated) return;
+        auto *p = new TrLPacket{};
+        p->n = evt.nTracks;
+        memcpy(p->lr, evt.trl, sizeof(float) * evt.nTracks * 2);
+        gEng.tsfTrLev.NonBlockingCall(p, [](Napi::Env env, Napi::Function cb, TrLPacket *d) {
+            Napi::Array a = Napi::Array::New(env, d->n * 2);
+            for (int i = 0; i < d->n * 2; i++)
+                a.Set((uint32_t)i, Napi::Number::New(env, d->lr[i]));
+            cb.Call({a});
+            delete d;
+        });
+        break;
+    }
+    case EvtKind::InputLev: {
+        if (!gEng.tsfInputLevCreated) return;
+        auto *p = new LevPacket{evt.lr[0], evt.lr[1]};
+        gEng.tsfInputLevels.NonBlockingCall(p, [](Napi::Env env, Napi::Function cb, LevPacket *d) {
+            Napi::Array a = Napi::Array::New(env, 2);
+            a.Set(0u, Napi::Number::New(env, d->l));
+            a.Set(1u, Napi::Number::New(env, d->r));
+            cb.Call({a});
+            delete d;
+        });
+        break;
+    }
+    default: break;
+    }
+}
+
+static void dispatchThreadFn() {
+    CbEvent evt;
+    while (!gEng.dispatchThreadStop.load(std::memory_order_relaxed)) {
+        while (gEng.evtRing.pop(evt)) dispatchEvent(evt);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    // Drain any events that arrived between the last poll and the stop signal.
+    while (gEng.evtRing.pop(evt)) dispatchEvent(evt);
+}
+
 // ── PortAudio callback ────────────────────────────────────────────────────────
 // Called by PortAudio on the audio thread ~every 512 frames (≈10ms @ 48kHz).
-// NO IPC, NO allocations for the hot path, NO blocking calls allowed here.
+// ZERO heap allocations. ZERO locks. ZERO system calls. ZERO TSFN calls.
+// Events are pushed to evtRing (lock-free SPSC); dispatchThreadFn() consumes them.
 // Position posted every 2 callbacks (~47fps), levels every 3 (~31fps).
 
 static int paCallback(
@@ -469,77 +608,51 @@ static int paCallback(
         if (allEnded) {
             if (out) memset(out, 0, n * 2 * sizeof(float));
             e.active.store(0, std::memory_order_relaxed);
-
-            auto *pkt = new EndPacket{(double)newPos / e.sampleRate};
-            e.tsfEnded.NonBlockingCall(pkt,
-                [](Napi::Env env, Napi::Function cb, EndPacket *d) {
-                    cb.Call({Napi::Number::New(env, d->pos)});
-                    delete d;
-                });
+            CbEvent endEvt;
+            endEvt.kind = EvtKind::Ended;
+            endEvt.pos  = (double)newPos / e.sampleRate;
+            e.evtRing.push(endEvt);
             return paComplete;
         }
     }
 
-    // Throttled event dispatch.
+    // Push throttled events to the lock-free ring — NO allocation, NO locks.
+    // dispatchThreadFn() drains the ring and calls NonBlockingCall off the audio thread.
     e.cbCount++;
 
     // Position: every 2 callbacks (~47fps @ 512fr/48kHz).
     if (e.cbCount % 2 == 0) {
-        auto *pkt = new PosPacket{(double)newPos / e.sampleRate};
-        e.tsfPos.NonBlockingCall(pkt,
-            [](Napi::Env env, Napi::Function cb, PosPacket *d) {
-                cb.Call({Napi::Number::New(env, d->pos)});
-                delete d;
-            });
+        CbEvent posEvt;
+        posEvt.kind = EvtKind::Pos;
+        posEvt.pos  = (double)newPos / e.sampleRate;
+        e.evtRing.push(posEvt);
     }
 
     // Master levels + per-track levels: every 3 callbacks (~31fps).
     if (e.cbCount % 3 == 0) {
         {
-            auto *pkt = new LevPacket{
-                std::sqrt(masterL / n),
-                std::sqrt(masterR / n)
-            };
-            e.tsfLevels.NonBlockingCall(pkt,
-                [](Napi::Env env, Napi::Function cb, LevPacket *d) {
-                    Napi::Array a = Napi::Array::New(env, 2);
-                    a.Set(0u, Napi::Number::New(env, d->l));
-                    a.Set(1u, Napi::Number::New(env, d->r));
-                    cb.Call({a});
-                    delete d;
-                });
+            CbEvent levEvt;
+            levEvt.kind  = EvtKind::Lev;
+            levEvt.lr[0] = std::sqrt(masterL / n);
+            levEvt.lr[1] = std::sqrt(masterR / n);
+            e.evtRing.push(levEvt);
         }
         {
-            auto *pkt = new TrLPacket{};
-            pkt->n = ntc;
+            CbEvent trlEvt;
+            trlEvt.kind    = EvtKind::TrLev;
+            trlEvt.nTracks = static_cast<uint8_t>(ntc);
             for (int t = 0; t < ntc; t++) {
-                pkt->lr[t*2]     = std::sqrt(tL[t] / n);
-                pkt->lr[t*2 + 1] = std::sqrt(tR[t] / n);
+                trlEvt.trl[t*2]     = std::sqrt(tL[t] / n);
+                trlEvt.trl[t*2 + 1] = std::sqrt(tR[t] / n);
             }
-            e.tsfTrLev.NonBlockingCall(pkt,
-                [](Napi::Env env, Napi::Function cb, TrLPacket *d) {
-                    Napi::Array a = Napi::Array::New(env, d->n * 2);
-                    for (int i = 0; i < d->n * 2; i++)
-                        a.Set((uint32_t)i, Napi::Number::New(env, d->lr[i]));
-                    cb.Call({a});
-                    delete d;
-                });
+            e.evtRing.push(trlEvt);
         }
-
-        // Input levels (recording only).
-        if (rec && e.tsfInputLevCreated) {
-            auto *pkt = new LevPacket{
-                std::sqrt(inRmsL / n),
-                std::sqrt(inRmsR / n)
-            };
-            e.tsfInputLevels.NonBlockingCall(pkt,
-                [](Napi::Env env, Napi::Function cb, LevPacket *d) {
-                    Napi::Array a = Napi::Array::New(env, 2);
-                    a.Set(0u, Napi::Number::New(env, d->l));
-                    a.Set(1u, Napi::Number::New(env, d->r));
-                    cb.Call({a});
-                    delete d;
-                });
+        if (rec) {
+            CbEvent inLevEvt;
+            inLevEvt.kind  = EvtKind::InputLev;
+            inLevEvt.lr[0] = std::sqrt(inRmsL / n);
+            inLevEvt.lr[1] = std::sqrt(inRmsR / n);
+            e.evtRing.push(inLevEvt);
         }
     }
 
@@ -663,6 +776,10 @@ Napi::Value Play(const Napi::CallbackInfo &info) {
     gEng.tsfEnded  = Napi::ThreadSafeFunction::New(env, info[7].As<Napi::Function>(), "pa:ended", 0, 1);
     gEng.tsfCreated = true;
 
+    // Start dispatch thread before the stream so it is ready on the first callback.
+    gEng.dispatchThreadStop.store(0, std::memory_order_relaxed);
+    gEng.dispatchThread = std::thread(dispatchThreadFn);
+
     PaStreamParameters outP{};
     outP.device           = (deviceId >= 0) ? deviceId : Pa_GetDefaultOutputDevice();
     outP.channelCount     = 2;
@@ -768,9 +885,12 @@ Napi::Value Record(const Napi::CallbackInfo &info) {
         gEng.tsfRecProgressCreated = true;
     }
 
-    // Start write thread before opening stream so it's ready immediately.
+    // Start write thread and dispatch thread before opening the stream so both
+    // are ready to receive data on the very first callback invocation.
     gEng.writeThreadStop.store(0, std::memory_order_relaxed);
     gEng.writeThread = std::thread(writeThreadFn);
+    gEng.dispatchThreadStop.store(0, std::memory_order_relaxed);
+    gEng.dispatchThread = std::thread(dispatchThreadFn);
 
     // ── Input stream parameters ───────────────────────────────────────────────
     // For ASIO: use PaAsioStreamInfo + paAsioUseChannelSelectors to open only
@@ -875,6 +995,12 @@ Napi::Value Abort(const Napi::CallbackInfo &info) {
         Pa_CloseStream(gEng.stream);
         gEng.stream = nullptr;
     }
+    // Dispatch thread must join before releaseTsfns() — it may still be firing
+    // events while the stream is shutting down and the TSFNs must stay live.
+    if (gEng.dispatchThread.joinable()) {
+        gEng.dispatchThreadStop.store(1, std::memory_order_relaxed);
+        gEng.dispatchThread.join();
+    }
     // If a write thread is running, stop it (incomplete take — no header patch).
     if (gEng.writeThread.joinable()) {
         gEng.writeThreadStop.store(1, std::memory_order_relaxed);
@@ -944,8 +1070,16 @@ static bool gPaInitialized = false;
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     if (!gPaInitialized) {
         PaError err = Pa_Initialize();
-        if (err == paNoError) gPaInitialized = true;
-        // If already initialized by naudiodon, that's fine — Pa_Initialize is ref-counted.
+        if (err == paNoError) {
+            gPaInitialized = true;
+        } else if (err != paNotInitialized) {
+            // paNotInitialized here means naudiodon already initialized PA — that's fine.
+            // Any other error means PA is genuinely broken; throw so the JS side sees it.
+            Napi::Error::New(env,
+                std::string("PortAudio backend unavailable: Pa_Initialize failed: ") + Pa_GetErrorText(err)
+            ).ThrowAsJavaScriptException();
+            return exports;
+        }
     }
 
     exports.Set("play",          Napi::Function::New(env, Play));

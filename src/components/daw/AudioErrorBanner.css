@@ -1,0 +1,108 @@
+.audio-error-banner {
+  position: relative;
+  z-index: 200;
+  background: #2a1a1a;
+  border-bottom: 2px solid #c0392b;
+  color: #f5c6c6;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.audio-error-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  min-height: 36px;
+}
+
+.audio-error-icon {
+  color: #e74c3c;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.audio-error-backend {
+  background: #c0392b;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+
+.audio-error-msg {
+  flex: 1;
+  line-height: 1.4;
+  color: #f0d0d0;
+}
+
+.audio-error-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.audio-error-btn {
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 3px 9px;
+  transition: background 0.12s;
+}
+
+.audio-error-btn--details {
+  background: #3d2020;
+  color: #f0d0d0;
+  border: 1px solid #5a3030;
+}
+.audio-error-btn--details:hover { background: #4d2828; }
+
+.audio-error-btn--settings {
+  background: #c0392b;
+  color: #fff;
+  font-weight: 600;
+}
+.audio-error-btn--settings:hover { background: #a93226; }
+
+.audio-error-btn--dismiss {
+  background: transparent;
+  color: #c0a0a0;
+  padding: 3px 7px;
+  font-size: 13px;
+}
+.audio-error-btn--dismiss:hover { color: #f0d0d0; }
+
+.audio-error-details {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 8px 34px;
+  border-top: 1px solid #3d2020;
+  background: #1f1212;
+}
+
+.audio-error-tech {
+  flex: 1;
+  font-family: 'Consolas', 'Menlo', monospace;
+  font-size: 11px;
+  color: #d4a0a0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.audio-error-btn--copy {
+  background: #3d2020;
+  color: #f0d0d0;
+  border: 1px solid #5a3030;
+  flex-shrink: 0;
+}
+.audio-error-btn--copy:hover { background: #4d2828; }

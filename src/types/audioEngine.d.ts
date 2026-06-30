@@ -32,8 +32,15 @@ export interface NativeTrackSpec {
 
 export interface AudioEngineAPI {
   isAvailable():   Promise<boolean>;
+  getInitError():  Promise<string | null>;
   getDevices():    Promise<AudioDevice[]>;
   getHostAPIs():   Promise<{ HostAPIs: AudioHostAPI[] }>;
+
+  // Recording safety / crash recovery
+  getDiskSpace(dir: string):               Promise<{ available: number; total: number } | null>;
+  checkFile(filePath: string):             Promise<{ exists: boolean; sizeBytes: number }>;
+  readFileHead(filePath: string, bytes: number): Promise<number[] | null>;
+  deleteFile(filePath: string):            Promise<boolean>;
 
   play(specs: NativeTrackSpec[], startTime: number, outDeviceId?: number, sr?: number): Promise<void>;
   stop():          Promise<void>;

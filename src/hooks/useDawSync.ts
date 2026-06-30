@@ -318,6 +318,24 @@ export const useDawSync = (
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           } as any };
         }
+        if (action.type === 'UPDATE_REGION') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const u = (action.payload as any).updates as Record<string, unknown>;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          syncAction = { ...action, payload: {
+            ...(action.payload as any),
+            updates: {
+              ...u,
+              audioUrl:       typeof u.audioUrl === 'string' && (u.audioUrl.startsWith('blob:') || u.audioUrl.startsWith('file:')) ? '' : u.audioUrl,
+              localFilePath:  undefined,
+              waveformPeaks:  u.waveformPeaks  ? downsamplePeaks(u.waveformPeaks  as number[]) : u.waveformPeaks,
+              waveformPeaksR: u.waveformPeaksR ? downsamplePeaks(u.waveformPeaksR as number[]) : u.waveformPeaksR,
+              sourcePeaks:    u.sourcePeaks    ? downsamplePeaks(u.sourcePeaks    as number[]) : u.sourcePeaks,
+              sourcePeaksR:   u.sourcePeaksR   ? downsamplePeaks(u.sourcePeaksR   as number[]) : u.sourcePeaksR,
+            },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any };
+        }
         const broadcastPayload = { ...syncAction, fromSync: true };
         const payloadJson = JSON.stringify(broadcastPayload);
         console.log(`[SYNC 5] Broadcasting ${syncAction.type} — payload size: ${payloadJson.length} bytes`);
