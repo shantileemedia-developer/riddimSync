@@ -6,6 +6,24 @@
   align-items: center;
   padding: 0 12px;
   flex-shrink: 0;
+  /* Gaps between buttons are draggable — interactive children opt out below */
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+}
+
+/* Every interactive element inside the toolbar must opt out of drag */
+.toolbar-tool-btn,
+.toolbar-btn,
+.grid-toggle,
+.grid-type,
+.grid-value,
+.color-pick-btn,
+.session-status-chip,
+.snap-dropdown,
+.color-palette-popup {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 /* Three-zone Cubase-style layout */
@@ -13,6 +31,7 @@
   display: flex;
   align-items: center;
   flex: 1;
+  align-self: stretch;   /* must stretch to fill toolbar height or drag area collapses to 0px */
 }
 
 .toolbar-center {

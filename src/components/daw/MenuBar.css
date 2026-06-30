@@ -23,10 +23,11 @@
 }
 
 /* Everything interactive inside the bar must opt out of drag */
+/* NOTE: .menu-bar-menus container is intentionally NOT here — its background
+   between menu items is draggable. Only the items themselves opt out. */
 .menu-bar-logo *,
-.menu-bar-menus,
 .menu-bar-item,
-.menu-bar-project,
+.menu-bar-item *,
 .menu-bar-project * {
   -webkit-app-region: no-drag;
   app-region: no-drag;
