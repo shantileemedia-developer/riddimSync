@@ -33,12 +33,6 @@ const InspectorPanel = ({ onClose }: { onClose?: () => void }) => {
   // Fallback: 16 channels so the picker is always useful even before device list loads.
   const maxInputCh = activeDevice ? activeDevice.maxInputChannels : (nativeDevices.length > 0 ? 2 : 16);
 
-  const panToLabel = (p: number) => {
-    if (Math.abs(p) < 0.02) return 'C';
-    const pct = Math.round(Math.abs(p) * 100);
-    return p < 0 ? `L${pct}` : `R${pct}`;
-  };
-
   if (!track) {
     return (
       <div className="daw-panel inspector-panel">
@@ -65,59 +59,6 @@ const InspectorPanel = ({ onClose }: { onClose?: () => void }) => {
       </div>
 
       <div className="inspector-content">
-        {/* Volume & Pan */}
-        <div className="inspector-section" style={{ paddingBottom: 4 }}>
-          <div className="inspector-control-row">
-            <span className="inspector-label">VOL</span>
-            <input
-              type="range"
-              min="0"
-              max="2"
-              step="0.01"
-              value={track.volume ?? 0.8}
-              onChange={e => dispatch({
-                type: 'UPDATE_TRACK',
-                payload: { id: track.id, updates: { volume: parseFloat(e.target.value) } },
-              })}
-              onDoubleClick={() => dispatch({
-                type: 'UPDATE_TRACK',
-                payload: { id: track.id, updates: { volume: 0.8 } },
-              })}
-              className="inspector-volume-slider"
-              style={{ width: 100 }}
-            />
-            <span className="fader-value" style={{ minWidth: 52, fontSize: 10 }}>
-              {gainToDb(track.volume ?? 0.8)}
-            </span>
-          </div>
-          <div className="inspector-control-row">
-            <span className="inspector-label">PAN</span>
-            <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.01"
-              value={track.pan ?? 0}
-              onChange={e => dispatch({
-                type: 'UPDATE_TRACK',
-                payload: { id: track.id, updates: { pan: parseFloat(e.target.value) } },
-              })}
-              onDoubleClick={() => dispatch({
-                type: 'UPDATE_TRACK',
-                payload: { id: track.id, updates: { pan: 0 } },
-              })}
-              className="inspector-volume-slider"
-              style={{ width: 100 }}
-            />
-            <span className="fader-value" style={{ minWidth: 52, fontSize: 10 }}>
-              {panToLabel(track.pan ?? 0)}
-            </span>
-          </div>
-          <div style={{ fontSize: 10, color: '#555', paddingLeft: 4, paddingBottom: 2 }}>
-            Double-click to reset
-          </div>
-        </div>
-
         {/* Routing */}
         <div className="inspector-section">
           <div className="section-header" onClick={() => setRoutingOpen(v => !v)}>

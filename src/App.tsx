@@ -1,14 +1,17 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import './index.css';
 
 import { supabase } from './lib/supabaseClient';
 import { getMyArtistCode, type ArtistCode } from './lib/artistCodes';
 import { DawProvider } from './context/DawContext';
+import { VideoCallProvider } from './context/VideoCallContext';
+import { MonitorStreamProvider } from './context/MonitorStreamContext';
 import DawWorkspace from './components/daw/DawWorkspace';
 import AuthScreen from './components/auth/AuthScreen';
 import SessionScreen from './components/session/SessionScreen';
 import LandingPage from './components/landing/LandingPage';
 import EngineerConsole from './components/engineer/EngineerConsole';
+import { StudioErrorBoundary } from './components/error/StudioErrorBoundary';
 
 // Admin panel loaded lazily — not needed by most users
 const AdminPanel = lazy(() => import('./components/admin/AdminPanel'));
@@ -37,6 +40,19 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [passwordResetMode, setPasswordResetMode] = useState(false);
+
+  // Safe mode: set by StudioErrorBoundary when user clicks "Reload in Safe Mode".
+  // Disables native audio init for the current session.
+  const [safeMode, setSafeMode] = useState(() => {
+    const req = localStorage.getItem('sl_safe_mode_next') === 'true';
+    if (req) localStorage.removeItem('sl_safe_mode_next');
+    return req;
+  });
+  // Crash breadcrumb: set when entering studio, cleared on clean exit / after stable timeout.
+  // If still set on next launch, the previous studio session didn't exit cleanly.
+  const [prevCrashDetected] = useState(() => localStorage.getItem('sl_in_studio') === 'true');
+  const [crashBannerDismissed, setCrashBannerDismissed] = useState(false);
+  const studioStableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Re-validate Supabase session on mount + listen for PASSWORD_RECOVERY
   useEffect(() => {
@@ -109,6 +125,13 @@ function App() {
   const handleJoinSession = (code: string) => {
     setRoomCode(code);
     localStorage.setItem('sl_room', code);
+    // Crash breadcrumb: cleared on clean exit or after 10 s stable render
+    localStorage.setItem('sl_in_studio', 'true');
+    if (studioStableTimerRef.current) clearTimeout(studioStableTimerRef.current);
+    studioStableTimerRef.current = setTimeout(() => {
+      localStorage.removeItem('sl_in_studio');
+      localStorage.removeItem('sl_studio_crash_count');
+    }, 10_000);
   };
 
   // Called from SessionScreen when artist claims a new code
@@ -212,7 +235,29 @@ function App() {
     );
   }
 
+  const handleLeaveSession = () => {
+    if (studioStableTimerRef.current) clearTimeout(studioStableTimerRef.current);
+    localStorage.removeItem('sl_room');
+    localStorage.removeItem('sl_in_studio');
+    localStorage.removeItem('sl_studio_crash_count');
+    setRoomCode(null);
+    setSafeMode(false);
+  };
+
+  const handleBackToDashboard = () => {
+    if (studioStableTimerRef.current) clearTimeout(studioStableTimerRef.current);
+    localStorage.removeItem('sl_room');
+    localStorage.removeItem('sl_in_studio');
+    setRoomCode(null);
+    setSafeMode(false);
+  };
+
+  const showCrashBanner = prevCrashDetected && !crashBannerDismissed && !safeMode;
+
   return (
+    <StudioErrorBoundary onBackToDashboard={handleBackToDashboard}>
+    <VideoCallProvider roomCode={roomCode} userId={session.user.id} isInitiator={false}>
+    <MonitorStreamProvider roomCode={roomCode} userId={session.user.id} isEngineer={false}>
     <DawProvider userRole={userRole}>
       <div className="app-container daw-mode">
         {showPinTip && (
@@ -229,16 +274,55 @@ function App() {
             }}>×</button>
           </div>
         )}
+        {safeMode && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9998,
+            background: '#1a2a18', borderBottom: '1px solid #00cc6644',
+            padding: '5px 16px', fontSize: 12, color: '#00cc66',
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            <span>⚠ Safe Mode — native audio disabled.</span>
+            <button
+              onClick={() => setSafeMode(false)}
+              style={{ background: 'none', border: '1px solid #00cc6644', color: '#00cc66',
+                borderRadius: 4, padding: '2px 10px', fontSize: 11, cursor: 'pointer' }}
+            >
+              Exit Safe Mode
+            </button>
+          </div>
+        )}
+        {showCrashBanner && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9998,
+            background: '#1e1010', borderBottom: '1px solid #ff444444',
+            padding: '5px 16px', fontSize: 12, color: '#ff8080',
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            <span>The previous studio session didn't exit cleanly.</span>
+            <button
+              onClick={() => { setSafeMode(true); setCrashBannerDismissed(true); }}
+              style={{ background: 'none', border: '1px solid #ff444444', color: '#ff8080',
+                borderRadius: 4, padding: '2px 10px', fontSize: 11, cursor: 'pointer' }}
+            >
+              Reload in Safe Mode
+            </button>
+            <button
+              onClick={() => setCrashBannerDismissed(true)}
+              style={{ background: 'none', border: 'none', color: '#555',
+                fontSize: 14, cursor: 'pointer', marginLeft: 'auto' }}
+            >
+              ×
+            </button>
+          </div>
+        )}
         <DawWorkspace
           userRole={userRole}
           userId={session.user.id}
           roomCode={roomCode}
           isAdmin={isAdmin}
+          safeMode={safeMode}
           onOpenAdmin={() => setShowAdminPanel(true)}
-          onLeaveSession={() => {
-            localStorage.removeItem('sl_room');
-            setRoomCode(null);
-          }}
+          onLeaveSession={handleLeaveSession}
         />
         {showAdminPanel && (
           <Suspense fallback={null}>
@@ -247,6 +331,9 @@ function App() {
         )}
       </div>
     </DawProvider>
+    </MonitorStreamProvider>
+    </VideoCallProvider>
+    </StudioErrorBoundary>
   );
 }
 

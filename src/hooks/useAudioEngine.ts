@@ -1018,10 +1018,11 @@ export const useAudioEngine = (opts?: { enabled?: boolean }) => {
     if (countInBars > 0) {
       const bps = state.transport.tempo / 60;
       const beatDuration = 1 / bps;
-      for (let i = 0; i < countInBars * 4; i++) {
-        scheduleClick(ctx, ctx.currentTime + (i * beatDuration), i % 4 === 0);
+      const bpb = state.transport.timeSignature[0];
+      for (let i = 0; i < countInBars * bpb; i++) {
+        scheduleClick(ctx, ctx.currentTime + (i * beatDuration), i % bpb === 0);
       }
-      setTimeout(startRecordingSession, (countInBars * 4 * beatDuration) * 1000);
+      setTimeout(startRecordingSession, (countInBars * bpb * beatDuration) * 1000);
     } else {
       startRecordingSession();
     }

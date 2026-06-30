@@ -348,6 +348,20 @@ const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
   const posSnapRef        = useRef(0);   // position at anchor moment
   const posWallRef        = useRef(0);   // performance.now() at anchor moment
   const wasPlayingRef     = useRef(false); // detects play/stop transitions
+  const wasRecordingRef   = useRef(false);
+
+  // Transport state machine — controls which position formula the RAF uses.
+  // STOPPED   : cursor = exact engine position
+  // STARTING  : cursor held at start; waits for first IPC pos before moving (prevents
+  //             the one-frame visual snap that occurs before the engine sends position #1)
+  // PLAYING   : wall-clock extrapolation + 10% soft drift correction
+  // RECORDING : same as PLAYING — live waveform width updates never affect playhead timing
+  type TxState = 'stopped' | 'starting' | 'playing' | 'recording';
+  const transportStateRef   = useRef<TxState>('stopped');
+  const startingAnchorRef   = useRef(0);    // cursor position held during STARTING
+  const startingDeadlineRef = useRef(0);    // performance.now() deadline for STARTING
+  const debugMetrics        = useRef({ maxDriftMs: 0, avgDriftMs: 0, samples: 0 });
+
   zoomRef.current         = zoom;
 
   // Track height helpers
@@ -793,87 +807,108 @@ const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
       ctx2d.fill();
     };
 
-    // ── AUDIT counters (shared across frames, closed over) ───────────────────
-    let _auditRafCnt     = 0;
-    let _auditLastPlaying = false;
+    let _auditRafCnt = 0;
 
     const tick = () => {
-      // Interpolate between IPC position events (arrive ~every 20 ms) using the
-      // wall clock so the cursor moves at 60 fps instead of stuttering.
-      const ipcPos   = currentTimeRef.current;
-      const nowMs    = performance.now();
-      const playing  = isPlayingRef.current;
-
-      // ── AUDIT: log state transitions ────────────────────────────────────────
-      if (playing !== _auditLastPlaying) {
-        console.log(
-          `[AUDIT][RAF][tick] TRANSITION playing=${playing} ` +
-          `ipcPos=${ipcPos.toFixed(4)}s ` +
-          `posSnap=${posSnapRef.current.toFixed(4)}s ` +
-          `reactTime=${state.transport.currentTime?.toFixed(4) ?? 'n/a'}s`,
-        );
-        _auditLastPlaying = playing;
-      }
-      // Log every ~60 frames (~1 s) while playing
+      const ipcPos  = currentTimeRef.current;
+      const nowMs   = performance.now();
+      const playing = isPlayingRef.current;
+      const rec     = isRecordingRef.current;
       _auditRafCnt++;
-      if (playing && _auditRafCnt % 60 === 0) {
-        const predicted = posSnapRef.current + (nowMs - posWallRef.current) / 1000;
-        console.log(
-          `[AUDIT][RAF][tick] ipcPos=${ipcPos.toFixed(4)}s ` +
-          `predicted=${predicted.toFixed(4)}s ` +
-          `drift=${((ipcPos - predicted) * 1000).toFixed(1)}ms ` +
-          `reactTime=${state.transport.currentTime?.toFixed(4) ?? 'n/a'}s`,
-        );
+
+      // ── Transport state machine ─────────────────────────────────────────────
+      if (!playing && !rec) {
+        // Stopped or paused — exit any active state
+        if (transportStateRef.current !== 'stopped') {
+          console.log(`[Transport] STOPPED at ${ipcPos.toFixed(3)}s | avgDrift=${debugMetrics.current.avgDriftMs.toFixed(1)}ms maxDrift=${debugMetrics.current.maxDriftMs.toFixed(1)}ms`);
+          transportStateRef.current     = 'stopped';
+          debugMetrics.current.maxDriftMs = 0;
+          debugMetrics.current.avgDriftMs = 0;
+          debugMetrics.current.samples    = 0;
+        }
+        posSnapRef.current = ipcPos;
+        posWallRef.current = nowMs;
+      } else if (playing && !wasPlayingRef.current) {
+        // Transport just started — hold cursor at start position until the engine
+        // confirms its first position. Prevents a one-frame visual snap caused by
+        // the ~20ms gap before the first IPC position arrives.
+        transportStateRef.current   = 'starting';
+        startingAnchorRef.current   = ipcPos;
+        startingDeadlineRef.current = nowMs + 80; // 80ms safety timeout
+        posSnapRef.current = ipcPos;
+        posWallRef.current = nowMs;
+        console.log(`[Transport] STARTING from ${ipcPos.toFixed(3)}s`);
+      } else if (rec && !wasRecordingRef.current && transportStateRef.current === 'playing') {
+        // Recording started mid-session — keep existing anchor, just track state.
+        transportStateRef.current = 'recording';
+        console.log('[Transport] RECORDING');
       }
 
-      // Per-second render diagnostic during recording — proves RAF sees recording state
-      // and that all DOM refs are populated and receiving updates
-      if (isRecordingRef.current && _auditRafCnt % 60 === 0) {
-        const recDur = Math.max(0, currentTimeRef.current - recordingStartTimeRef.current);
-        console.log(
-          `[AUDIT][RAF][recording]` +
-          ` cur=${currentTimeRef.current.toFixed(3)}s` +
-          ` recStart=${recordingStartTimeRef.current.toFixed(3)}s` +
-          ` dur=${recDur.toFixed(3)}s` +
-          ` lineTransform=${playheadLineRef.current?.style.transform ?? 'NO_REF'}` +
-          ` liveW=${liveRegionRef.current?.style.width ?? 'NO_REF(not_armed?)'}` +
-          ` rafRunning=true` +
-          ` playing=${isPlayingRef.current}` +
-          ` recording=${isRecordingRef.current}`,
-        );
-      }
+      wasPlayingRef.current   = playing;
+      wasRecordingRef.current = rec;
 
-      if (playing && !wasPlayingRef.current) {
-        // Play just started — anchor to current IPC position and local wall clock.
-        posSnapRef.current  = ipcPos;
-        posWallRef.current  = nowMs;
-      } else if (!playing) {
-        // Stopped — snap cursor to exact IPC position, reset anchor.
-        posSnapRef.current  = ipcPos;
-        posWallRef.current  = nowMs;
-      } else {
-        // Playing — gentle drift correction; hard snap only on a real seek/restart.
-        const predicted = posSnapRef.current + (nowMs - posWallRef.current) / 1000;
-        const drift = ipcPos - predicted;
+      // ── Position calculation ────────────────────────────────────────────────
+      let t: number;
+      const txState = transportStateRef.current;
 
-        if (Math.abs(drift) > 0.5) {
-          // Big jump = seek or stream restart — hard snap
-          console.log(
-            `[AUDIT][RAF][tick] RE-ANCHOR seek detected ` +
-            `ipcPos=${ipcPos.toFixed(4)}s predicted=${predicted.toFixed(4)}s`,
-          );
+      if (txState === 'stopped') {
+        t = ipcPos;
+      } else if (txState === 'starting') {
+        // Hold cursor until engine sends its first position (ipcPos advances past anchor)
+        // or until the 80ms deadline elapses — whichever comes first.
+        const firstPosArrived = ipcPos > startingAnchorRef.current + 0.001;
+        if (firstPosArrived || nowMs > startingDeadlineRef.current) {
+          transportStateRef.current = rec ? 'recording' : 'playing';
           posSnapRef.current = ipcPos;
           posWallRef.current = nowMs;
+          console.log(
+            `[Transport] PLAYING (${firstPosArrived ? 'first-pos' : 'timeout'}) ` +
+            `anchor=${ipcPos.toFixed(3)}s start=${startingAnchorRef.current.toFixed(3)}s`,
+          );
+        }
+        t = startingAnchorRef.current; // no visual movement yet
+      } else {
+        // PLAYING or RECORDING: extrapolate with soft drift correction.
+        // Live waveform width updates (recording) read currentTimeRef directly and
+        // never touch posSnapRef, so the playhead timeline stays independent.
+        const predicted  = posSnapRef.current + (nowMs - posWallRef.current) / 1000;
+        const drift      = ipcPos - predicted;
+        let   correction = 0;
+
+        if (Math.abs(drift) > 0.5) {
+          // Seek or stream restart — hard snap
+          posSnapRef.current = ipcPos;
+          posWallRef.current = nowMs;
+          console.log(`[Transport] HARD-SNAP drift=${(drift * 1000).toFixed(1)}ms engine=${ipcPos.toFixed(3)}s`);
         } else if (Math.abs(drift) > 0.005) {
           // Small drift — nudge 10% toward engine position each frame
-          posSnapRef.current = predicted + drift * 0.1;
+          correction = drift * 0.1;
+          posSnapRef.current = predicted + correction;
           posWallRef.current = nowMs;
         }
-      }
-      wasPlayingRef.current = playing;
 
-      const elapsed = playing ? (nowMs - posWallRef.current) / 1000 : 0;
-      const t = posSnapRef.current + elapsed;
+        t = posSnapRef.current + (nowMs - posWallRef.current) / 1000;
+
+        // Rolling metrics — readable from console via window.__dawMetrics in dev
+        const m = debugMetrics.current;
+        m.samples++;
+        const absDriftMs = Math.abs(drift) * 1000;
+        m.maxDriftMs = Math.max(m.maxDriftMs, absDriftMs);
+        m.avgDriftMs = m.avgDriftMs + (absDriftMs - m.avgDriftMs) / m.samples;
+
+        if (_auditRafCnt % 60 === 0) {
+          console.log(
+            `[Transport] ${txState} engine=${ipcPos.toFixed(4)}s predicted=${predicted.toFixed(4)}s ` +
+            `drift=${(drift * 1000).toFixed(1)}ms correction=${(correction * 1000).toFixed(1)}ms ` +
+            `avg=${m.avgDriftMs.toFixed(1)}ms max=${m.maxDriftMs.toFixed(1)}ms`,
+          );
+        }
+      }
+
+      if (rec && _auditRafCnt % 60 === 0) {
+        const recDur = Math.max(0, ipcPos - recordingStartTimeRef.current);
+        console.log(`[Transport] RECORDING dur=${recDur.toFixed(3)}s playhead=${t.toFixed(3)}s`);
+      }
       const x = t * zoomRef.current * BASE_PX_PER_SEC;
       if (playheadRulerRef.current) playheadRulerRef.current.style.transform = `translateX(${x}px)`;
       if (playheadLineRef.current)  playheadLineRef.current.style.transform  = `translateX(${x}px)`;
@@ -923,6 +958,13 @@ const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [currentTimeRef, recordingStartTimeRef, livePeaksRef]);
+
+  // Expose live drift metrics to the browser console for before/after measurement.
+  // Usage: window.__dawMetrics (reset between measurements by seeking or restarting).
+  useEffect(() => {
+    (window as any).__dawMetrics = debugMetrics.current;
+    return () => { delete (window as any).__dawMetrics; };
+  }, []);
 
   // Create the time readout element imperatively so React never owns or clears it.
   // Any React-managed child would get wiped by reconciliation on every re-render.
@@ -2334,7 +2376,7 @@ const ArrangeWindow = forwardRef<ArrangeWindowHandle, {
                       ref={liveRegionRef}
                       className="audio-region region-recording-live"
                       style={{
-                        left: recordingStartTimeRef.current * pxPerSec,
+                        transform: `translateX(${recordingStartTimeRef.current * pxPerSec}px)`,
                         width: 4,
                         display: state.transport.isRecording ? undefined : 'none',
                       }}

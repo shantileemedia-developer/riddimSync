@@ -112,23 +112,44 @@ const createWindow = () => {
     });
   }
 
-  // ── Crash recovery — auto-reload on renderer crash ───────────────────────
+  // ── Debug shortcuts (Ctrl+Shift+I = DevTools, Ctrl+Shift+R = reload) ────
+  mainWindow.webContents.on('before-input-event', (_e, input) => {
+    if (!mainWindow) return;
+    if (input.type !== 'keyDown') return;
+    if (input.control && input.shift && input.key === 'I') {
+      mainWindow.webContents.toggleDevTools();
+    }
+    if (input.control && input.shift && input.key === 'R') {
+      if (isDev) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!);
+      else       mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    }
+  });
+
+  // ── Crash recovery — log + auto-reload on renderer crash ─────────────────
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
-    console.error('[crash] Renderer process gone:', details.reason);
-    if (mainWindow && details.reason !== 'clean-exit') {
+    const reason   = details.reason;
+    const exitCode = (details as any).exitCode ?? 'n/a';
+    console.error(`[crash] Renderer process gone — reason: ${reason}, exitCode: ${exitCode}`);
+
+    // Persist crash info so the renderer can display it after reload
+    try {
+      const crashLog = path.join(app.getPath('userData'), 'crash-log.json');
+      const prev: any[] = (() => { try { return JSON.parse(fs.readFileSync(crashLog, 'utf-8')); } catch { return []; } })();
+      prev.unshift({ time: new Date().toISOString(), reason, exitCode });
+      fs.writeFileSync(crashLog, JSON.stringify(prev.slice(0, 10)));
+    } catch { /* non-fatal */ }
+
+    if (mainWindow && reason !== 'clean-exit') {
       dialog.showMessageBox(mainWindow, {
         type: 'warning',
         title: 'RiddimSync — Unexpected Error',
-        message: 'The app window crashed unexpectedly.',
-        detail: 'RiddimSync will reload automatically.',
-        buttons: ['OK'],
+        message: 'The studio crashed unexpectedly.',
+        detail: `Reason: ${reason}${exitCode !== 'n/a' ? ` (exit code ${exitCode})` : ''}\n\nRiddimSync will reload automatically.`,
+        buttons: ['Reload Now'],
       }).then(() => {
         if (mainWindow) {
-          if (isDev) {
-            mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!);
-          } else {
-            mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
-          }
+          if (isDev) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!);
+          else       mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
         }
       });
     }

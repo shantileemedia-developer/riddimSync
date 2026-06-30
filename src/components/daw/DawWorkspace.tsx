@@ -26,6 +26,7 @@ import AudioErrorBanner from './AudioErrorBanner';
 import RecordingRecoveryDialog from './RecordingRecoveryDialog';
 import SampleRateMismatchDialog from './SampleRateMismatchDialog';
 import LyricsPanel from './LyricsPanel';
+import { PanelErrorBoundary } from '../error/PanelErrorBoundary';
 import { supabase } from '../../lib/supabaseClient';
 import type { MonitorQuality } from '../../hooks/useAudioStream';
 import { generatePeaksStereo, uploadAudioToSupabase } from '../../utils/audioUtils';
@@ -36,6 +37,7 @@ interface DawWorkspaceProps {
   userId: string;
   roomCode: string;
   isAdmin?: boolean;
+  safeMode?: boolean;
   onOpenAdmin?: () => void;
   onLeaveSession?: () => void;
   onArtistLeft?: () => void;
@@ -43,7 +45,7 @@ interface DawWorkspaceProps {
   artistName?: string;
 }
 
-const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode, isAdmin, onOpenAdmin, onLeaveSession, onArtistLeft, onExitDawControl, artistName }) => {
+const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode, isAdmin, safeMode = false, onOpenAdmin, onLeaveSession, onArtistLeft, onExitDawControl, artistName }) => {
   const [showPreferences, setShowPreferences] = useState(false);
   const [showAudioPrefs, setShowAudioPrefs] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
@@ -99,7 +101,7 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
   const lastViewSyncRef  = useRef(0);
   // Disable Web Audio when the native preload bridge is present — only one engine active at a time
   const webAudio   = useAudioEngine({ enabled: !window.audioEngine });
-  const nativeAudio = useNativeAudioEngine(roomCode);
+  const nativeAudio = useNativeAudioEngine(roomCode, safeMode);
   // Use native engine when available; fall back to Web Audio API
   const { play, pause, stop, record, seek } = nativeAudio.nativeAvailable ? nativeAudio : webAudio;
   const { state, dispatch, masterStreamRef, nativeStreamRef, audioCtxRef, currentTimeRef, audioDirPath } = useDaw();
@@ -736,34 +738,36 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
         } as React.CSSProperties),
       }}
     >
-      <MenuBar
-        userRole={userRole}
-        onSendRemoteCommand={userRole === 'engineer' ? broadcastRemoteOp : undefined}
-        onOpenAudioPrefs={() => {
-          if (userRole === 'engineer') broadcastRemoteOp('open-audio-settings');
-          else setShowAudioPrefs(true);
-        }}
-        onLeaveSession={() => {
-          if (onLeaveSession) {
-            onLeaveSession();
-          } else {
+      <PanelErrorBoundary name="Menu Bar" fill={false}>
+        <MenuBar
+          userRole={userRole}
+          onSendRemoteCommand={userRole === 'engineer' ? broadcastRemoteOp : undefined}
+          onOpenAudioPrefs={() => {
+            if (userRole === 'engineer') broadcastRemoteOp('open-audio-settings');
+            else setShowAudioPrefs(true);
+          }}
+          onLeaveSession={() => {
+            if (onLeaveSession) {
+              onLeaveSession();
+            } else {
+              localStorage.removeItem('sl_room');
+              localStorage.removeItem('sl_showApp');
+              localStorage.removeItem('sl_role');
+              window.location.reload();
+            }
+          }}
+          onCloseProject={async () => {
+            await supabase.auth.signOut();
             localStorage.removeItem('sl_room');
             localStorage.removeItem('sl_showApp');
             localStorage.removeItem('sl_role');
             window.location.reload();
-          }
-        }}
-        onCloseProject={async () => {
-          await supabase.auth.signOut();
-          localStorage.removeItem('sl_room');
-          localStorage.removeItem('sl_showApp');
-          localStorage.removeItem('sl_role');
-          window.location.reload();
-        }}
-        onToggleLyrics={() => setShowLyrics(v => !v)}
-        isAdmin={isAdmin}
-        onOpenAdmin={onOpenAdmin}
-      />
+          }}
+          onToggleLyrics={() => setShowLyrics(v => !v)}
+          isAdmin={isAdmin}
+          onOpenAdmin={onOpenAdmin}
+        />
+      </PanelErrorBoundary>
       {showPreferences && <PreferencesDialog onClose={() => setShowPreferences(false)} />}
       {showAudioPrefs && <AudioMIDIPreferencesDialog onClose={() => setShowAudioPrefs(false)} />}
       {showLyrics && <LyricsPanel onClose={() => setShowLyrics(false)} />}
@@ -778,7 +782,9 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
       )}
       <SampleRateMismatchDialog onOpenAudioSettings={() => setShowAudioPrefs(true)} />
 
-      <TopToolbar roomCode={roomCode} userRole={userRole} onlineCount={onlineCount} desktopActive={rcActive} />
+      <PanelErrorBoundary name="Top Toolbar" fill={false}>
+        <TopToolbar roomCode={roomCode} userRole={userRole} onlineCount={onlineCount} desktopActive={rcActive} />
+      </PanelErrorBoundary>
       <AudioErrorBanner onOpenAudioSettings={() => setShowAudioPrefs(true)} />
 
       {/* Autosave restore banner */}
@@ -829,15 +835,17 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
 
       {/* ── Engineer: Monitor Stream panel (master bus, always visible) ── */}
       {userRole === 'engineer' && (
-        <MonitorPanel
-          remoteStream={liveRemoteStream}
-          isReceiving={isReceiving}
-          connectionState={monitorConnectionState}
-          quality={monitorQuality}
-          onQualityChange={(q) => { setMonitorQuality(q); requestQuality(q); }}
-          source={monitorSource}
-          onSourceChange={handleMonitorSourceChange}
-        />
+        <PanelErrorBoundary name="Monitor Panel" fill={false}>
+          <MonitorPanel
+            remoteStream={liveRemoteStream}
+            isReceiving={isReceiving}
+            connectionState={monitorConnectionState}
+            quality={monitorQuality}
+            onQualityChange={(q) => { setMonitorQuality(q); requestQuality(q); }}
+            source={monitorSource}
+            onSourceChange={handleMonitorSourceChange}
+          />
+        </PanelErrorBoundary>
       )}
 
       {/* ── Engineer: Remote Session header ── */}
@@ -891,7 +899,9 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
       <div className="daw-main-area">
         {state.panelVisibility.inspector && (
           <>
-            <InspectorPanel onClose={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { inspector: false } })} />
+            <PanelErrorBoundary name="Inspector">
+              <InspectorPanel onClose={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { inspector: false } })} />
+            </PanelErrorBoundary>
             <div
               className="panel-resize-handle panel-resize-h"
               onPointerDown={e => startResize(e, 'inspector')}
@@ -902,17 +912,21 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
 
         <div className="daw-arrange-section">
           <div className="daw-arrange-container">
-            <TrackList />
+            <PanelErrorBoundary name="Track List">
+              <TrackList />
+            </PanelErrorBoundary>
             <div
               className="panel-resize-handle panel-resize-h"
               onPointerDown={e => startResize(e, 'tracklist')}
               title="Drag to resize track list"
             />
-            <ArrangeWindow
-              ref={arrangeRef}
-              onSeek={handleSeek}
-              onViewChange={handleViewChange}
-            />
+            <PanelErrorBoundary name="Arrange Window">
+              <ArrangeWindow
+                ref={arrangeRef}
+                onSeek={handleSeek}
+                onViewChange={handleViewChange}
+              />
+            </PanelErrorBoundary>
           </div>
           {state.panelVisibility.mixer && (
             <>
@@ -921,43 +935,53 @@ const DawWorkspace: React.FC<DawWorkspaceProps> = ({ userRole, userId, roomCode,
                 onPointerDown={e => startResize(e, 'mixer')}
                 title="Drag to resize mixer"
               />
-              <MixerPanel onClose={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { mixer: false } })} />
+              <PanelErrorBoundary name="Mixer">
+                <MixerPanel onClose={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { mixer: false } })} />
+              </PanelErrorBoundary>
             </>
           )}
         </div>
 
-        {state.panelVisibility.mediaPool && <MediaPoolPanel roomCode={roomCode} onClose={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { mediaPool: false } })} onToast={(msg) => setToast({ msg, id: Date.now() })} />}
+        {state.panelVisibility.mediaPool && (
+          <PanelErrorBoundary name="Media Pool">
+            <MediaPoolPanel roomCode={roomCode} onClose={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { mediaPool: false } })} onToast={(msg) => setToast({ msg, id: Date.now() })} />
+          </PanelErrorBoundary>
+        )}
       </div>
 
-      <TransportPanel
-        toggleInspector={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { inspector: !state.panelVisibility.inspector } })}
-        toggleMixer={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { mixer: !state.panelVisibility.mixer } })}
-        toggleMediaPool={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { mediaPool: !state.panelVisibility.mediaPool } })}
-        onPlay={handlePlay}
-        onStop={handleStop}
-        onReturnToZero={handleReturnToZero}
-        onRecord={handleRecord}
-        onStopRecording={handleStopRecording}
-        userRole={userRole}
-        isReceiving={isReceiving}
-      />
+      <PanelErrorBoundary name="Transport" fill={false}>
+        <TransportPanel
+          toggleInspector={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { inspector: !state.panelVisibility.inspector } })}
+          toggleMixer={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { mixer: !state.panelVisibility.mixer } })}
+          toggleMediaPool={() => dispatch({ type: 'SET_PANEL_VISIBILITY', payload: { mediaPool: !state.panelVisibility.mediaPool } })}
+          onPlay={handlePlay}
+          onStop={handleStop}
+          onReturnToZero={handleReturnToZero}
+          onRecord={handleRecord}
+          onStopRecording={handleStopRecording}
+          userRole={userRole}
+          isReceiving={isReceiving}
+        />
+      </PanelErrorBoundary>
 
-      <FloatingVideoChat
-        ref={floatingChatRef}
-        userRole={userRole}
-        userId={userId}
-        roomCode={roomCode}
-        masterStreamRef={masterStreamRef}
-        nativeStreamRef={nativeStreamRef}
-        audioCtxRef={audioCtxRef}
-        onInputEvent={handleInputEvent}
-        onRcStateChange={handleRcStateChange}
-        onAppRcChange={handleAppRcChange}
-        dawControlActive={dawControlActive}
-        onDawControlGranted={handleDawControlGranted}
-        onDawControlRevoked={handleDawControlRevoked}
-        muteCallAudio={monitorSource === 'mix'}
-      />
+      <PanelErrorBoundary name="Video Chat" fill={false}>
+        <FloatingVideoChat
+          ref={floatingChatRef}
+          userRole={userRole}
+          userId={userId}
+          roomCode={roomCode}
+          masterStreamRef={masterStreamRef}
+          nativeStreamRef={nativeStreamRef}
+          audioCtxRef={audioCtxRef}
+          onInputEvent={handleInputEvent}
+          onRcStateChange={handleRcStateChange}
+          onAppRcChange={handleAppRcChange}
+          dawControlActive={dawControlActive}
+          onDawControlGranted={handleDawControlGranted}
+          onDawControlRevoked={handleDawControlRevoked}
+          muteCallAudio={monitorSource === 'mix'}
+        />
+      </PanelErrorBoundary>
 
       {/* Desktop RC — DesktopControlFullscreen handles event capture; badge shown here */}
       {rcActive && userRole === 'engineer' && (

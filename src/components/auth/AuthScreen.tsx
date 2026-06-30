@@ -56,11 +56,12 @@ const PasswordField: React.FC<{
 const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, passwordResetMode }) => {
   const [screen, setScreen]                     = useState<Screen>(passwordResetMode ? 'reset-password' : 'signin');
   const [signupRole, setSignupRole]             = useState<'artist' | 'engineer'>('artist');
-  const [email, setEmail]                       = useState('');
+  const [email, setEmail]                       = useState(() => localStorage.getItem('sl_remembered_email') ?? '');
   const [displayName, setDisplayName]           = useState('');
   const [password, setPassword]                 = useState('');
   const [confirmPassword, setConfirmPassword]   = useState('');
   const [codeInput, setCodeInput]               = useState('');
+  const [rememberMe, setRememberMe]             = useState(() => !!localStorage.getItem('sl_remembered_email'));
   const [loading, setLoading]                   = useState(false);
   const [error, setError]                       = useState('');
   const [info, setInfo]                         = useState('');
@@ -98,6 +99,11 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, passwordResetMode }) =
         } catch { /* already claimed or expired — proceed anyway */ }
       }
 
+      if (rememberMe) {
+        localStorage.setItem('sl_remembered_email', email);
+      } else {
+        localStorage.removeItem('sl_remembered_email');
+      }
       onLogin(role, data.session);
     } catch (err: any) {
       setError(err.message || 'Sign in failed.');
@@ -534,6 +540,14 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, passwordResetMode }) =
               placeholder="you@studio.com" autoFocus required />
           </div>
           <PasswordField value={password} onChange={setPassword} autoComplete="current-password" />
+          <label className="auth-remember-row">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={e => setRememberMe(e.target.checked)}
+            />
+            Remember me
+          </label>
           <div className="auth-recovery-links">
             <button type="button" className="auth-link small" onClick={() => resetForm('forgot-password')}>
               Forgot password?

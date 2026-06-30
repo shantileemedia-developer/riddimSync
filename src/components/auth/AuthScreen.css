@@ -262,6 +262,25 @@
   line-height: 1.6;
 }
 
+/* ── Remember me ── */
+
+.auth-remember-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #888;
+  cursor: pointer;
+  user-select: none;
+  margin-top: -2px;
+}
+.auth-remember-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #00ffcc;
+  cursor: pointer;
+}
+
 /* ── Recovery links row (below password on sign-in) ── */
 
 .auth-recovery-links {

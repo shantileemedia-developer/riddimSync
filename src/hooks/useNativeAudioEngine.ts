@@ -74,7 +74,7 @@ async function decodeToWavBuffer(ab: ArrayBuffer): Promise<ArrayBuffer> {
 
 // ── Hook ───────────────────────────────────────────────────────────────────────
 
-export const useNativeAudioEngine = (roomCode = '') => {
+export const useNativeAudioEngine = (roomCode = '', safeMode = false) => {
   const {
     state, dispatch,
     currentTimeRef, audioCtxRef,
@@ -94,10 +94,24 @@ export const useNativeAudioEngine = (roomCode = '') => {
   const nativeAvailableRef = useRef(false);
 
   useEffect(() => {
+    if (safeMode) {
+      console.warn('[NativeAudio] Safe mode active — native audio init skipped.');
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(
+        'Safe Mode: native audio disabled. Exit Safe Mode to enable.',
+        { code: 'BACKEND_UNAVAILABLE' },
+      )});
+      return;
+    }
     if (!eng()) return;
     eng()!.isAvailable().then(ok => {
       nativeAvailableRef.current = ok;
       setNativeAvailable(ok);
+    }).catch((err: unknown) => {
+      console.error('[NativeAudio] isAvailable() threw:', err);
+      dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(
+        `Native audio bridge error: ${err instanceof Error ? err.message : String(err)}`,
+        { code: 'BACKEND_UNAVAILABLE' },
+      )});
     });
     // Surface Pa_Initialize failure that occurred before the renderer was ready
     eng()!.getInitError?.().then((errMsg: string | null) => {
@@ -105,7 +119,7 @@ export const useNativeAudioEngine = (roomCode = '') => {
         console.error('[NativeAudio] Pa_Initialize failed at addon load:', errMsg);
         dispatch({ type: 'SET_AUDIO_ERROR', payload: makeAudioError(errMsg, { code: 'BACKEND_UNAVAILABLE' }) });
       }
-    });
+    }).catch(() => {});
     const off = eng()!.onUnavailable(() => {
       nativeAvailableRef.current = false;
       setNativeAvailable(false);
@@ -135,7 +149,7 @@ export const useNativeAudioEngine = (roomCode = '') => {
       }
     });
     return off;
-  }, [dispatch]);
+  }, [dispatch, safeMode]);
 
   // ── Transport refs (kept in sync with state so closures read current values)
 

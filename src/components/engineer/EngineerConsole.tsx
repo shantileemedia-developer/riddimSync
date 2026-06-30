@@ -3,6 +3,8 @@ import { supabase } from '../../lib/supabaseClient';
 import { DawProvider } from '../../context/DawContext';
 import DawWorkspace from '../daw/DawWorkspace';
 import FloatingVideoChat from '../daw/FloatingVideoChat';
+import { VideoCallProvider } from '../../context/VideoCallContext';
+import { MonitorStreamProvider } from '../../context/MonitorStreamContext';
 import { loadAudioPrefs } from '../daw/AudioMIDIPreferencesDialog';
 import type { AudioPrefs } from '../daw/AudioMIDIPreferencesDialog';
 import './EngineerConsole.css';
@@ -345,16 +347,20 @@ export default function EngineerConsole({ userId, displayName, isAdmin, onOpenAd
       {phase === 'connected' && roomCode && (() => {
         const p = loadAudioPrefs();
         return (
-          <FloatingVideoChat
-            userRole="engineer"
-            userId={userId}
-            roomCode={roomCode}
-            masterStreamRef={nullStreamRef}
-            nativeStreamRef={nullNativeStreamRef}
-            audioCtxRef={nullAudioCtxRef}
-            audioInputDeviceId={p.inputDeviceId}
-            audioOutputDeviceId={p.outputDeviceId}
-          />
+          <VideoCallProvider roomCode={roomCode} userId={userId} isInitiator={true}>
+            <MonitorStreamProvider roomCode={roomCode} userId={userId} isEngineer={true}>
+              <FloatingVideoChat
+                userRole="engineer"
+                userId={userId}
+                roomCode={roomCode}
+                masterStreamRef={nullStreamRef}
+                nativeStreamRef={nullNativeStreamRef}
+                audioCtxRef={nullAudioCtxRef}
+                audioInputDeviceId={p.inputDeviceId}
+                audioOutputDeviceId={p.outputDeviceId}
+              />
+            </MonitorStreamProvider>
+          </VideoCallProvider>
         );
       })()}
     </div>
