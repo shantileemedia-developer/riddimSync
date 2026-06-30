@@ -21,6 +21,7 @@
 #define NAPI_VERSION 6
 #include <napi.h>
 #include <portaudio.h>
+#include "pa_asio.h"
 
 #include <atomic>
 #include <chrono>
@@ -671,7 +672,7 @@ Napi::Value Play(const Napi::CallbackInfo &info) {
     outP.hostApiSpecificStreamInfo = nullptr;
 
     PaError err = Pa_OpenStream(&gEng.stream, nullptr, &outP,
-                                 sampleRate, 512, paNoFlag, paCallback, nullptr);
+                                 sampleRate, paFramesPerBufferUnspecified, paNoFlag, paCallback, nullptr);
     if (err != paNoError) {
         gEng.teardown();
         Napi::Error::New(env, std::string("Pa_OpenStream: ") + Pa_GetErrorText(err))
@@ -720,21 +721,10 @@ Napi::Value Record(const Napi::CallbackInfo &info) {
         chOffset = info[11].As<Napi::Number>().Int32Value();
     if (chOffset < 0) chOffset = 0;
 
-    // Optional 13th arg: onRecProgress callback — fired from the write thread
-    // every ~100ms with new peak values for the live waveform display.
-    // If omitted, peak accumulation still runs but no TSFN is fired.
-    if (info.Length() >= 13 && info[12].IsFunction()) {
-        gEng.tsfRecProgress = Napi::ThreadSafeFunction::New(
-            env, info[12].As<Napi::Function>(), "pa:recprog", 0, 1);
-        gEng.tsfRecProgressCreated = true;
-    }
-
     gEng.teardown();
     gEng.sampleRate          = sampleRate;
     gEng.recSr               = sampleRate;
     gEng.recCh               = 2;
-    gEng.recInputChOffset    = chOffset;
-    gEng.recInputNumCh       = (chOffset + 1 > 2) ? chOffset + 1 : 2;
     gEng.recBytesWritten     = 0;
     strncpy(gEng.recFilePath, filePath.c_str(), sizeof(gEng.recFilePath) - 1);
     gEng.recFilePath[sizeof(gEng.recFilePath) - 1] = '\0';
@@ -770,18 +760,59 @@ Napi::Value Record(const Napi::CallbackInfo &info) {
     gEng.tsfInputLevels    = Napi::ThreadSafeFunction::New(env, info[9].As<Napi::Function>(), "pa:inlev", 0, 1);
     gEng.tsfInputLevCreated = true;
 
+    // recProgress TSFN must be created AFTER teardown() — teardown calls
+    // releaseTsfns() which would immediately free any TSFN created before it.
+    if (info.Length() >= 13 && info[12].IsFunction()) {
+        gEng.tsfRecProgress = Napi::ThreadSafeFunction::New(
+            env, info[12].As<Napi::Function>(), "pa:recprog", 0, 1);
+        gEng.tsfRecProgressCreated = true;
+    }
+
     // Start write thread before opening stream so it's ready immediately.
     gEng.writeThreadStop.store(0, std::memory_order_relaxed);
     gEng.writeThread = std::thread(writeThreadFn);
 
-    // Build stream params.
+    // ── Input stream parameters ───────────────────────────────────────────────
+    // For ASIO: use PaAsioStreamInfo + paAsioUseChannelSelectors to open only
+    // the requested channel.  This avoids allocating DMA buffers for every
+    // channel on the device and is the pattern recommended by the PortAudio ASIO
+    // guide.  The callback then receives exactly 1 channel at offset 0.
+    //
+    // For non-ASIO (WASAPI, MME…): open enough channels to include chOffset and
+    // de-interleave in the callback as before.
+    int physInDev = (inDevId >= 0) ? inDevId : Pa_GetDefaultInputDevice();
+    bool isAsio = false;
+    {
+        const PaDeviceInfo  *di  = Pa_GetDeviceInfo(physInDev);
+        const PaHostApiInfo *api = di ? Pa_GetHostApiInfo(di->hostApi) : nullptr;
+        if (api && api->type == paASIO) isAsio = true;
+    }
+
+    PaAsioStreamInfo asioInInfo{};
+    long             asioChannelSel = static_cast<long>(chOffset);
+
     PaStreamParameters inP{};
-    inP.device         = (inDevId >= 0) ? inDevId : Pa_GetDefaultInputDevice();
-    inP.channelCount   = gEng.recInputNumCh;   // enough channels to reach the chosen offset
-    inP.sampleFormat   = paFloat32;
-    inP.suggestedLatency = Pa_GetDeviceInfo(inP.device)
-        ? Pa_GetDeviceInfo(inP.device)->defaultLowInputLatency : 0.02;
-    inP.hostApiSpecificStreamInfo = nullptr;
+    inP.device           = physInDev;
+    inP.sampleFormat     = paFloat32;
+    inP.suggestedLatency = Pa_GetDeviceInfo(physInDev)
+        ? Pa_GetDeviceInfo(physInDev)->defaultLowInputLatency : 0.02;
+
+    if (isAsio) {
+        asioInInfo.size             = sizeof(PaAsioStreamInfo);
+        asioInInfo.hostApiType      = paASIO;
+        asioInInfo.version          = 1;
+        asioInInfo.flags            = paAsioUseChannelSelectors;
+        asioInInfo.channelSelectors = &asioChannelSel;
+        inP.channelCount            = 1;
+        inP.hostApiSpecificStreamInfo = &asioInInfo;
+        gEng.recInputNumCh    = 1;
+        gEng.recInputChOffset = 0;  // PA delivers the selected channel at index 0
+    } else {
+        inP.channelCount            = (chOffset + 1 > 2) ? chOffset + 1 : 2;
+        inP.hostApiSpecificStreamInfo = nullptr;
+        gEng.recInputNumCh    = inP.channelCount;
+        gEng.recInputChOffset = chOffset;
+    }
 
     // Output is optional — pass nullptr if no output device (input-only recording).
     PaStreamParameters outP{};
@@ -799,7 +830,7 @@ Napi::Value Record(const Napi::CallbackInfo &info) {
     gEng.isRecording.store(1, std::memory_order_relaxed);
 
     PaError err = Pa_OpenStream(&gEng.stream, &inP, pOut,
-                                 sampleRate, 512, paNoFlag, paCallback, nullptr);
+                                 sampleRate, paFramesPerBufferUnspecified, paNoFlag, paCallback, nullptr);
     if (err != paNoError) {
         gEng.teardown();
         Napi::Error::New(env, std::string("Pa_OpenStream (record): ") + Pa_GetErrorText(err))
