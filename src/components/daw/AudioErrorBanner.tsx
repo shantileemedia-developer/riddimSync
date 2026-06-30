@@ -20,13 +20,6 @@ export default function AudioErrorBanner({ onOpenAudioSettings }: AudioErrorBann
   const [copied, setCopied] = useState(false);
 
   const error = state.audioError;
-  if (!error) return null;
-
-  const dismiss = () => {
-    dispatch({ type: 'CLEAR_AUDIO_ERROR' });
-    setShowDetails(false);
-    setCopied(false);
-  };
 
   const copyDetails = useCallback(() => {
     if (!error) return;
@@ -44,6 +37,14 @@ export default function AudioErrorBanner({ onOpenAudioSettings }: AudioErrorBann
       setTimeout(() => setCopied(false), 2000);
     }).catch(() => {});
   }, [error]);
+
+  if (!error) return null;
+
+  const dismiss = () => {
+    dispatch({ type: 'CLEAR_AUDIO_ERROR' });
+    setShowDetails(false);
+    setCopied(false);
+  };
 
   return (
     <div className="audio-error-banner" role="alert">
